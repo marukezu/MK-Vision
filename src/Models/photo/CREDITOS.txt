@@ -1,0 +1,11 @@
+IAs de ampliação de fotos (4x), usadas pelo visualizador de fotos do MK Vision (Ajustes → Fotos).
+
+- RealESRGAN_x4plus.onnx — Real-ESRGAN x4plus, de Xintao Wang et al. (https://github.com/xinntao/Real-ESRGAN),
+  licença BSD-3-Clause. Convertido do .pth oficial para ONNX aqui (C:\MKVisionTreino\converter_realesrgan.py).
+- 4x-UltraSharp.onnx — 4x-UltraSharp, de Kim2091 (https://huggingface.co/Kim2091/UltraSharp),
+  licença CC BY-NC-SA 4.0 (uso não comercial).
+- 4xFaceUpDAT.onnx e 4xFaceUpSharpDAT.onnx — 4xFaceUpDAT / 4xFaceUpSharpDAT (DAT, rostos), de Helaman / Philip Hofmann
+  (https://openmodeldb.info/models/4x-FaceUpDAT), licença CC BY 4.0. Convertidos para ONNX aqui
+  (C:\MKVisionTreino\converter_spandrel.py, com o spandrel, MIT).
+- 4xRealWebPhoto_v4_dat2.onnx — 4xRealWebPhoto_v4_dat2 (DAT2), de Philip Hofmann / Phhofm
+  (https://github.com/Phhofm/models/releases/tag/4xRealWebPhoto_v4_dat2), licença CC BY 4.0.

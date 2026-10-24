@@ -1,0 +1,9 @@
+﻿IAs de luz e cor (tecla Y), convertidas para ONNX a partir dos pesos oficiais dos autores:
+
+deep_wb_awb.onnx — Deep White-Balance Editing (equilíbrio de branco automático)
+  Mahmoud Afifi e Michael S. Brown, CVPR 2020 — https://github.com/mahmoudnafifi/Deep_White_Balance
+  Licença: Creative Commons BY-NC-SA 4.0 (uso NÃO comercial).
+
+iat_exposure.onnx — Illumination Adaptive Transformer (correção de exposição, treinado no MSEC)
+  Ziteng Cui e outros, BMVC 2022 — https://github.com/cuiziteng/Illumination-Adaptive-Transformer
+  Licença: Apache 2.0.

@@ -1,0 +1,11 @@
+Modelos de IA de upscaling (FSRCNNX) usados pelo MK Vision.
+
+FSRCNNX_x2_8-0-4-1.glsl
+  Autor: igv — https://github.com/igv/FSRCNN-TensorFlow (release 1.1)
+
+FSRCNNX_x2_16-0-4-1_enhance.glsl
+  Autor: igv, retreinado por HelpSeeker para vídeos com compressão forte
+  https://github.com/HelpSeeker/FSRCNN-TensorFlow (release 1.1_distort)
+
+Licença: GNU LGPL 3.0 (cabeçalho do arquivo original da igv; o retreino herda a licença). Arquivos mantidos sem alteração;
+o MK Vision converte os passos para WebGL2 ao carregar.

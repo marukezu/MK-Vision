@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Configurações</title>
+<!-- Página de configurações do navegador do MK Vision (aberta pela engrenagem da barra). Fica dentro do app
+     (https://configuracoes.mkvision/, mapeada para esta pasta) e conversa com ele por chrome.webview: pede o
+     estado ("settings-get") e manda cada mudança na hora. Cada assunto tem o seu painel, como no Edge. -->
+<style>
+  :root { --bg: #202124; --side: #1b1c1f; --card: #292a2d; --line: #3c4043; --text: #e8eaed; --muted: #9aa0a6;
+          --accent: #8ab4f8; --accent-bg: #2b3a55; --danger: #f28b82; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", sans-serif; display: flex; min-height: 100vh; }
+  .icon { font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 16px; line-height: 1; }
+  nav { width: 260px; flex: none; background: var(--side); padding: 20px 12px; border-right: 1px solid var(--line); }
+  nav h1 { font-size: 20px; font-weight: 600; margin: 4px 12px 18px; }
+  nav a { display: flex; align-items: center; gap: 14px; padding: 9px 12px; margin: 2px 0; border-radius: 8px; color: var(--text);
+          text-decoration: none; cursor: pointer; user-select: none; }
+  nav a:hover { background: #2a2b2f; }
+  nav a.on { background: var(--accent-bg); color: var(--accent); }
+  main { flex: 1; padding: 28px 40px 60px; max-width: 860px; }
+  section { display: none; }
+  section.on { display: block; }
+  h2 { font-size: 20px; font-weight: 600; margin: 0 0 18px; }
+  .card { background: var(--card); border-radius: 10px; padding: 4px 0; margin-bottom: 18px; }
+  .row { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row .grow { flex: 1; min-width: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  label.choice { cursor: pointer; }
+  input[type=radio] { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
+  button { background: transparent; color: var(--accent); border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px;
+           font: inherit; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #33353a; }
+  button.plain { border-color: transparent; padding: 6px 8px; color: var(--muted); }
+  button.plain:hover { color: var(--text); }
+  button:disabled { opacity: .3; pointer-events: none; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: #5f6368; border-radius: 11px; cursor: pointer; transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #e8eaed; transition: left .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { left: 21px; background: #202124; }
+  .pages { margin: 0 20px 14px 52px; border: 1px solid var(--line); border-radius: 8px; }
+  .pages.off { opacity: .45; pointer-events: none; }
+  .page { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border-top: 1px solid var(--line); }
+  .page:first-child { border-top: 0; }
+  .page .url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .page input { flex: 1; background: #202124; color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 10px; font: inherit; }
+  .empty { padding: 12px 14px; color: var(--muted); }
+  .actions { display: flex; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .error { color: var(--danger); font-size: 13px; padding: 0 14px 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 9px 20px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  td.key { width: 220px; white-space: nowrap; }
+  kbd { background: #3c4043; border-radius: 4px; padding: 1px 7px; font: 12px "Segoe UI"; }
+  .path { font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #3c4043; padding: 10px 18px;
+           border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+  ul { margin: 0; padding: 14px 20px 14px 40px; }
+  select { background: #202124; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Configurações</h1>
+  <a data-go="inicio"><span class="icon">&#xE7E8;</span>Ao iniciar</a>
+  <a data-go="aparencia"><span class="icon">&#xE790;</span>Aparência</a>
+  <a data-go="favoritos"><span class="icon">&#xE734;</span>Favoritos</a>
+  <a data-go="celular"><span class="icon">&#xE8EA;</span>Modo celular</a>
+  <a data-go="bloqueador"><span class="icon">&#xEA18;</span>Bloqueador de anúncios</a>
+  <a data-go="downloads"><span class="icon">&#xE896;</span>Downloads</a>
+  <a data-go="privacidade"><span class="icon">&#xE72E;</span>Privacidade</a>
+  <a data-go="desempenho"><span class="icon">&#xE945;</span>Desempenho</a>
+  <a data-go="atalhos"><span class="icon">&#xE765;</span>Atalhos do teclado</a>
+</nav>
+<main>
+  <section id="inicio">
+    <h2>Ao iniciar</h2>
+    <div class="card">
+      <label class="row choice"><input type="radio" name="startup" value="0">
+        <div class="grow">Continuar de onde parou<div class="sub">As abas abertas da última vez voltam.</div></div></label>
+      <label class="row choice"><input type="radio" name="startup" value="1">
+        <div class="grow">Abrir uma nova aba<div class="sub">Começa só com a página inicial (Google).</div></div></label>
+      <label class="row choice"><input type="radio" name="startup" value="2">
+        <div class="grow">Abrir estas páginas<div class="sub">Cada página abre numa aba, nesta ordem.</div></div></label>
+      <div class="pages" id="pages"></div>
+    </div>
+  </section>
+
+  <section id="aparencia">
+    <h2>Aparência</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Tema dos sites<div class="sub">Os sites que têm versão escura e clara mostram a que você escolher.</div></div></div>
+      <label class="row choice"><input type="radio" name="colorScheme" value="0">
+        <div class="grow">Igual ao Windows<div class="sub">Escuro se o Windows estiver no modo escuro.</div></div></label>
+      <label class="row choice"><input type="radio" name="colorScheme" value="1"><div class="grow">Escuro</div></label>
+      <label class="row choice"><input type="radio" name="colorScheme" value="2"><div class="grow">Claro</div></label>
+    </div>
+    <div class="card">
+      <div class="row"><div class="grow">Escurecer também os sites sem tema escuro
+        <div class="sub">O navegador escurece sozinho as páginas claras (fundo escuro, texto claro), como o modo escuro do Edge. Fotos e vídeos
+        não mudam. Em alguns sites as cores podem ficar diferentes do original.</div></div>
+        <label class="switch"><input type="checkbox" id="forceDark"><span></span></label></div>
+    </div>
+  </section>
+
+  <section id="desempenho">
+    <h2>Desempenho</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Abas dormindo
+        <div class="sub">Uma aba parada (fora da tela) por este tempo "dorme": a página fica congelada e libera memória e placa de vídeo para o
+        player e as IAs. Ao voltar para ela, acorda na hora, do jeito que estava. Abas tocando som não dormem.</div></div>
+        <select id="sleepMinutes">
+          <option value="0">Nunca</option><option value="5">5 minutos</option><option value="15">15 minutos</option>
+          <option value="30">30 minutos</option><option value="60">1 hora</option><option value="120">2 horas</option>
+        </select></div>
+    </div>
+  </section>
+
+  <section id="celular">
+    <h2>Modo celular</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Sites abertos como num celular
+        <div class="sub">Estes sites veem um Chrome de celular Android (identificação, toque e tela de celular) e mostram a versão
+        de celular, com tudo o que ela tem. A página fica numa coluna no centro; o mouse funciona como o dedo (arrastar desliza).
+        Vale também para os endereços dentro deles (ex.: instagram.com inclui www.instagram.com).</div></div></div>
+      <div class="pages" id="mobileSites"></div>
+    </div>
+  </section>
+
+  <section id="favoritos">
+    <h2>Favoritos</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Mostrar a barra de favoritos<div class="sub">Também com <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>.</div></div>
+        <label class="switch"><input type="checkbox" id="bookmarksBar"><span></span></label></div>
+      <div class="row"><div class="grow">Importar favoritos do Edge<div class="sub">Traz os favoritos e as pastas do Edge (os que já estão aqui não se repetem).</div></div>
+        <button id="importEdge">Importar</button></div>
+    </div>
+  </section>
+
+  <section id="bloqueador">
+    <h2>Bloqueador de anúncios</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Bloquear anúncios e rastreadores<div class="sub" id="adblockState">uBlock Origin Lite</div></div>
+        <label class="switch"><input type="checkbox" id="adblock"><span></span></label></div>
+      <div class="row"><div class="grow">Configurações do bloqueador<div class="sub">Listas de filtros e sites liberados.</div></div>
+        <button id="adblockDashboard">Abrir</button></div>
+      <div class="row"><div class="grow">Sites sem bloqueio
+        <div class="sub">Nestes sites o bloqueador não age. O Instagram vem aqui: a lista de privacidade do bloqueador barra os registros
+        do que você assiste, e sem eles o algoritmo não aprende o que você gosta (só os likes chegavam).</div></div></div>
+      <div class="pages" id="adblockAllowed"></div>
+      <div class="row"><div class="grow">Pop-ups<div class="sub">Janelas que o site abre sozinho, sem você clicar, são sempre bloqueadas. As de clique abrem em aba nova.</div></div></div>
+    </div>
+  </section>
+
+  <section id="downloads">
+    <h2>Downloads</h2>
+    <div class="card">
+      <div class="row"><div class="grow"><kbd>Ctrl</kbd> + <kbd>S</kbd> salva o vídeo da tela em<div class="sub path" id="downloadsPath"></div></div>
+        <button id="openDownloads">Abrir pasta</button></div>
+      <div class="row"><div class="grow">Downloads dos sites<div class="sub">Os arquivos que você baixa dos sites (lista do navegador). Também com <kbd>Ctrl</kbd> + <kbd>J</kbd>.</div></div>
+        <button id="downloadsList">Ver downloads</button></div>
+    </div>
+  </section>
+
+  <section id="privacidade">
+    <h2>Privacidade</h2>
+    <div class="card">
+      <div class="row"><div class="grow">Apagar o histórico interno e o cache ao fechar
+        <div class="sub">O motor do navegador guarda sozinho um histórico das páginas (mesmo sem tela de histórico) e cópias de imagens e
+        vídeos. Ligado, tudo isso é apagado ao fechar o MK Vision. Cookies, logins e senhas ficam (você continua logado).</div></div>
+        <label class="switch"><input type="checkbox" id="clearOnClose"><span></span></label></div>
+      <div class="row"><div class="grow">SmartScreen (aviso de site perigoso)
+        <div class="sub">A Microsoft confere os endereços que você abre e avisa de golpes e vírus. Para isso, ela recebe os endereços.
+        Desligado, nada vai para ela, mas um site falso abre sem aviso.</div></div>
+        <label class="switch"><input type="checkbox" id="smartScreen"><span></span></label></div>
+    </div>
+    <div class="card">
+      <ul>
+        <li>O MK Vision não tem tela de histórico e não manda nada para lugar nenhum. As sugestões da barra de endereço vêm só dos seus favoritos.</li>
+        <li>Ícones de sites ficam guardados só os dos favoritos; os outros somem ao fechar.</li>
+        <li>O registro do app (para diagnóstico) não guarda endereços, títulos nem nomes de arquivo.</li>
+        <li>Os cookies de um site vão para um arquivo temporário só para baixar ou tocar um vídeo dele no player, e são apagados ao fechar.</li>
+        <li>Ficam guardados: abas abertas (para "Continuar de onde parou"), favoritos, logins e os seus downloads.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="atalhos">
+    <h2>Atalhos do teclado</h2>
+    <div class="card"><table>
+      <tr><td class="key"><kbd>.</kbd></td><td>Abre no player o vídeo da tela (ou a imagem sob o mouse)</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td>Baixa o vídeo da tela</td></tr>
+      <tr><td class="key"><kbd>F2</kbd></td><td>Alterna entre o navegador e o player</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>T</kbd></td><td>Aba nova (com o endereço pronto para digitar)</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Fecha a aba</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd></td><td>Reabre a última aba fechada</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>Tab</kbd></td><td>Próxima aba (com <kbd>Shift</kbd>: a anterior)</td></tr>
+      <tr><td class="key">Botão do meio / <kbd>Ctrl</kbd> + clique</td><td>Abre o link numa aba atrás (você continua na de agora)</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>1</kbd>…<kbd>9</kbd></td><td>Vai para a aba (9 = a última)</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>L</kbd></td><td>Vai para a barra de endereço (digitando, aparecem os favoritos; <kbd>↑</kbd> <kbd>↓</kbd> escolhem)</td></tr>
+      <tr><td class="key"><kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>Na barra de endereço: abre em aba nova</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Adiciona aos favoritos</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td><td>Mostra ou esconde a barra de favoritos</td></tr>
+      <tr><td class="key"><kbd>F5</kbd></td><td>Recarrega a página</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd></td><td>Zoom da página (lembrado para cada site; <kbd>0</kbd> volta a 100%)</td></tr>
+      <tr><td class="key"><kbd>F11</kbd></td><td>Tela cheia do navegador (as abas aparecem com o mouse no topo)</td></tr>
+      <tr><td class="key"><kbd>Ctrl</kbd> + <kbd>J</kbd></td><td>Lista de downloads</td></tr>
+      <tr><td class="key"><kbd>Alt</kbd> + <kbd>Home</kbd></td><td>Página inicial</td></tr>
+    </table></div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const host = window.chrome && window.chrome.webview;
+let state = { startup: 0, pages: [], bookmarksBar: true, adblock: false, adblockInstalled: false, downloads: "", mobileSites: [], adblockAllowed: [] };
+
+// Só o domínio: "https://www.instagram.com/reels/" → "instagram.com".
+function domainOf(text) {
+  text = text.trim().toLowerCase();
+  if (!text) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//.test(text)) text = "https://" + text;
+  try {
+    const host = new URL(text).hostname.replace(/^www\./, "");
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) ? host : null;
+  } catch { return null; }
+}
+
+// Listas de sites (modo celular, sem bloqueio): mesma tela, cada uma com o seu ícone e o seu texto.
+const siteLists = {
+  mobileSites: { icon: "&#xE8EA;", empty: "Nenhum site: todos abrem como no computador." },
+  adblockAllowed: { icon: "&#xE785;", empty: "Nenhum site: o bloqueador vale em todos." },
+};
+const adding = {};
+
+function renderSites() { for (const key in siteLists) renderSiteList(key); }
+
+function renderSiteList(key) {
+  const box = $(key), list = state[key] || [], info = siteLists[key];
+  const save = () => { const data = {}; data[key] = list; state[key] = list; send("set", data); renderSiteList(key); };
+  box.innerHTML = "";
+  if (list.length === 0 && !adding[key]) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = info.empty;
+    box.appendChild(empty);
+  }
+  list.forEach((site, i) => {
+    const row = document.createElement("div");
+    row.className = "page";
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.innerHTML = info.icon;
+    const text = document.createElement("div");
+    text.className = "url";
+    text.textContent = site;
+    const remove = document.createElement("button");
+    remove.className = "plain icon";
+    remove.innerHTML = "&#xE74D;";
+    remove.title = "Remover";
+    remove.onclick = () => { list.splice(i, 1); save(); };
+    row.append(icon, text, remove);
+    box.appendChild(row);
+  });
+  if (adding[key]) {
+    const row = document.createElement("div");
+    row.className = "page";
+    const input = document.createElement("input");
+    input.placeholder = "instagram.com";
+    const ok = document.createElement("button");
+    ok.textContent = "Adicionar";
+    const cancel = document.createElement("button");
+    cancel.className = "plain";
+    cancel.textContent = "Cancelar";
+    const error = document.createElement("div");
+    error.className = "error";
+    const commit = () => {
+      const site = domainOf(input.value);
+      if (!site) { error.textContent = "Site inválido. Exemplo: instagram.com"; row.after(error); input.focus(); return; }
+      if (!list.includes(site)) list.push(site);
+      adding[key] = false;
+      save();
+    };
+    ok.onclick = commit;
+    cancel.onclick = () => { adding[key] = false; renderSiteList(key); };
+    input.onkeydown = e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel.onclick(); };
+    input.oninput = () => error.remove();
+    row.append(input, ok, cancel);
+    box.appendChild(row);
+    setTimeout(() => input.focus(), 0);
+  }
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const add = document.createElement("button");
+  add.textContent = "Adicionar um site";
+  add.onclick = () => { adding[key] = true; renderSiteList(key); };
+  actions.append(add);
+  box.appendChild(actions);
+}
+let editing = -1; // página em edição (-2 = nova)
+
+function send(type, data) { if (host) host.postMessage(Object.assign({ type: "settings-" + type }, data || {})); }
+function $(id) { return document.getElementById(id); }
+
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.classList.add("on");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove("on"), 2600);
+}
+
+// Painéis: um por assunto (endereço #inicio, #favoritos...).
+function show(name) {
+  if (!document.getElementById(name)) name = "inicio";
+  for (const s of document.querySelectorAll("section")) s.classList.toggle("on", s.id === name);
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", a.dataset.go === name);
+  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+}
+for (const a of document.querySelectorAll("nav a")) a.onclick = () => show(a.dataset.go);
+
+// Endereço digitado como na barra do navegador: sem "https://" também vale.
+function normalize(text) {
+  text = text.trim();
+  if (!text) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = "https://" + text;
+  try {
+    const url = new URL(text);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname.includes(".")) return null;
+    return url.href;
+  } catch { return null; }
+}
+
+function savePages() { send("set", { pages: state.pages }); }
+
+function renderPages() {
+  const box = $("pages");
+  box.classList.toggle("off", state.startup !== 2);
+  box.innerHTML = "";
+  if (state.pages.length === 0 && editing !== -2) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Nenhuma página ainda. Sem nenhuma, abre a página inicial.";
+    box.appendChild(empty);
+  }
+  const editor = (value, index) => {
+    const row = document.createElement("div");
+    row.className = "page";
+    const input = document.createElement("input");
+    input.value = value;
+    input.placeholder = "youtube.com";
+    const ok = document.createElement("button");
+    ok.textContent = index === -2 ? "Adicionar" : "Salvar";
+    const cancel = document.createElement("button");
+    cancel.className = "plain";
+    cancel.textContent = "Cancelar";
+    const error = document.createElement("div");
+    error.className = "error";
+    const commit = () => {
+      const url = normalize(input.value);
+      if (!url) { error.textContent = "Endereço inválido. Exemplo: youtube.com"; row.after(error); input.focus(); return; }
+      if (index === -2) state.pages.push(url); else state.pages[index] = url;
+      editing = -1;
+      savePages();
+      renderPages();
+    };
+    ok.onclick = commit;
+    cancel.onclick = () => { editing = -1; renderPages(); };
+    input.onkeydown = e => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancel.onclick(); };
+    input.oninput = () => error.remove();
+    row.append(input, ok, cancel);
+    box.appendChild(row);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  };
+  state.pages.forEach((url, i) => {
+    if (i === editing) { editor(url, i); return; }
+    const row = document.createElement("div");
+    row.className = "page";
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.innerHTML = "&#xE774;";
+    const text = document.createElement("div");
+    text.className = "url";
+    text.textContent = url;
+    text.title = url;
+    const button = (glyph, title, action, enabled = true) => {
+      const b = document.createElement("button");
+      b.className = "plain icon";
+      b.disabled = !enabled;
+      b.innerHTML = glyph;
+      b.title = title;
+      b.onclick = action;
+      return b;
+    };
+    row.append(icon, text,
+      button("&#xE74A;", "Subir", () => { [state.pages[i - 1], state.pages[i]] = [state.pages[i], state.pages[i - 1]]; savePages(); renderPages(); }, i > 0),
+      button("&#xE74B;", "Descer", () => { [state.pages[i + 1], state.pages[i]] = [state.pages[i], state.pages[i + 1]]; savePages(); renderPages(); }, i < state.pages.length - 1),
+      button("&#xE70F;", "Editar", () => { editing = i; renderPages(); }),
+      button("&#xE74D;", "Remover", () => { state.pages.splice(i, 1); savePages(); renderPages(); }));
+    box.appendChild(row);
+  });
+  if (editing === -2) editor("", -2);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const add = document.createElement("button");
+  add.textContent = "Adicionar uma página";
+  add.onclick = () => { editing = -2; renderPages(); };
+  const current = document.createElement("button");
+  current.textContent = "Usar as abas abertas agora";
+  current.onclick = () => send("current-tabs");
+  actions.append(add, current);
+  box.appendChild(actions);
+}
+
+function render() {
+  for (const r of document.querySelectorAll("input[name=startup]")) r.checked = Number(r.value) === state.startup;
+  $("bookmarksBar").checked = state.bookmarksBar;
+  $("adblock").checked = state.adblock;
+  $("clearOnClose").checked = state.clearOnClose !== false;
+  $("smartScreen").checked = state.smartScreen !== false;
+  for (const r of document.querySelectorAll("input[name=colorScheme]")) r.checked = Number(r.value) === (state.colorScheme || 0);
+  $("forceDark").checked = !!state.forceDark;
+  $("sleepMinutes").value = String(state.sleepMinutes ?? 30);
+  $("adblock").disabled = !state.adblockInstalled;
+  $("adblockState").textContent = state.adblockInstalled ? "uBlock Origin Lite — " + (state.adblock ? "ligado" : "desligado") : "uBlock Origin Lite — instalando...";
+  $("downloadsPath").textContent = state.downloads;
+  renderPages();
+  renderSites();
+}
+
+for (const r of document.querySelectorAll("input[name=startup]"))
+  r.onchange = () => { state.startup = Number(r.value); send("set", { startup: state.startup }); renderPages(); };
+$("bookmarksBar").onchange = e => send("set", { bookmarksBar: e.target.checked });
+$("adblock").onchange = e => send("set", { adblock: e.target.checked });
+$("clearOnClose").onchange = e => send("set", { clearOnClose: e.target.checked });
+$("smartScreen").onchange = e => send("set", { smartScreen: e.target.checked });
+for (const r of document.querySelectorAll("input[name=colorScheme]"))
+  r.onchange = () => send("set", { colorScheme: Number(r.value) });
+$("forceDark").onchange = e => send("set", { forceDark: e.target.checked });
+$("sleepMinutes").onchange = e => send("set", { sleepMinutes: Number(e.target.value) });
+$("downloadsList").onclick = () => send("downloads-list");
+$("importEdge").onclick = () => send("import-edge");
+$("adblockDashboard").onclick = () => send("adblock-dashboard");
+$("openDownloads").onclick = () => send("open-downloads");
+
+if (host) host.addEventListener("message", e => {
+  const m = e.data;
+  if (!m || typeof m !== "object") return;
+  if (m.type === "state") {
+    const keep = editing !== -1 ? state.pages : null; // não atrapalha uma edição em andamento
+    state = Object.assign(state, m);
+    if (keep) state.pages = keep;
+    render();
+  } else if (m.type === "tabs") {
+    if (!m.urls.length) { toast("Nenhuma aba de site aberta"); return; }
+    state.pages = m.urls;
+    state.startup = 2;
+    editing = -1;
+    send("set", { startup: 2, pages: state.pages });
+    render();
+    toast(m.urls.length === 1 ? "1 página adicionada" : m.urls.length + " páginas adicionadas");
+  } else if (m.type === "toast") toast(m.text);
+});
+
+// Mudou por fora (Ctrl+Shift+B, o escudo da barra): pega o estado de novo ao voltar para a aba.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) send("get"); });
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+show(location.hash.slice(1));
+render();
+send("get");
+</script>
+</body>
+</html>

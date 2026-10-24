@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Janela, sem console (o log fica em %LOCALAPPDATA%\MKVisionDesktop\log.txt) -->
+    <OutputType>WinExe</OutputType>
+    <!-- Windows 10 SDK: dá acesso à API de captura de tela (Windows.Graphics.Capture) -->
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>MKVisionDesktop</AssemblyName>
+    <!-- Versão do app (a das Releases do GitHub) -->
+    <Version>1.0.0-beta</Version>
+    <RootNamespace>MKVision.Desktop</RootNamespace>
+    <!-- Ícone do .exe e da janela: cópia do escolhido entre Icon\mk-lente.ico e Icon\mk-globo.ico
+         (python Icon\gerar_ico.py lente|globo gera os dois e troca o app.ico) -->
+    <ApplicationIcon>Icon\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.24.4" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Shaders\*.hlsl" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Web\*.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Web\settings\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Models\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

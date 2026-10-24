@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+*.user
+
+# IA de câmera lenta treinada com os vídeos do usuário: fica só no computador dele
+src/Models/rife/rife_v4.26_mk.onnx
+
+# IAs de fotos (baixadas; grandes demais para o repositório)
+src/Models/photo/*.onnx
+
+# IAs de luz e cor (convertidas dos pesos dos autores; ver Models\tone\CREDITOS.txt)
+src/Models/tone/*.onnx
+
+# Pasta portátil gerada pelo "Gerar pasta portatil.bat"
+dist/

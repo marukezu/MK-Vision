@@ -1,0 +1,5 @@
+RIFE v4.26 (Real-Time Intermediate Flow Estimation) — hzwer, https://github.com/hzwer/Practical-RIFE
+Licença: MIT. Conversão ONNX ("v2", com ajuste de tamanho interno) do projeto vs-mlrt (AmusementClub):
+https://github.com/AmusementClub/vs-mlrt/releases/tag/external-models (rife_v4.26.7z, pasta rife_v2).
+Arquivo usado sem alteração; ao carregar, o MK Vision expõe como saídas o fluxo óptico (/Add_7_output_0)
+e a máscara de mistura (/Sigmoid_output_0) para gerar vários quadros intermediários com uma só análise.
