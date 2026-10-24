@@ -60,6 +60,7 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--webmenutest") return WebBrowserTest.WebMenu(args[1]);
         if (args.Length == 1 && args[0] == "--nvidiapacktest") return NvidiaPack.Test();
         if (args.Length == 1 && args[0] == "--updatetest") return Updater.Test();
+        if (args.Length is 2 or 3 && args[0] == "--performancetest") return WebBrowserTest.Performance(args[1], args.Length == 3 && args[2] == "comfy");
         if (args.Length == 2 && args[0] == "--updateflowtest") return WebBrowserTest.UpdateFlow(args[1]);
         if (args.Length == 1 && args[0] == "--nvidiapackdownload") return NvidiaPack.DownloadTest();
         if (args.Length == 2 && args[0] == "--webopenbuttontest") return WebBrowserTest.WebOpenButton(args[1]);

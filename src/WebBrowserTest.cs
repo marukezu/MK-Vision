@@ -2596,6 +2596,109 @@ internal static class WebBrowserTest
         return player.TestClosed ? 0 : 1;
     }
 
+    // --performancetest <pasta> [comfy]: prioridades (o app acima do normal; com "comfy", liga o ComfyUI e confere que ele
+    // fica abaixo do normal no processador, no disco e na placa); desenhar só no ritmo do vídeo (num vídeo de 30
+    // quadros, ~30 desenhos por segundo, e o vídeo andando no tempo certo; na câmera lenta com IA, toda atualização da
+    // tela); e o modo ComfyUI (IA rápida, câmera lenta com IA pausada, e de volta). Usar com MKV_SETTINGS e MKV_LOG.
+    public static int Performance(string folder, bool comfy)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Directory.CreateDirectory(folder);
+        string clip = Path.Combine(folder, "clip.mp4");
+        MediaFactory.MFStartup(true).CheckError();
+        PlayerTest.WriteClip(clip);
+        using var gpu = new Gpu();
+        int failures = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "OK    " : "FALHOU")} {what}: {detail}");
+            if (!ok) failures++;
+        }
+        void Pump(double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                while (Native.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1)) { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
+                Thread.Sleep(5);
+            }
+        }
+        bool Wait(Func<bool> condition, double seconds)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition() && clock.Elapsed.TotalSeconds < seconds) Pump(0.1);
+            return condition();
+        }
+        var player = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        // Desenhos por segundo e quanto o vídeo andou, em "seconds" de relógio.
+        (double draws, double video) Measure(double seconds)
+        {
+            long d0 = player.FramesDrawn;
+            double t0 = player.State.fileTime;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Pump(seconds);
+            double t1 = player.State.fileTime;
+            double moved = t1 >= t0 ? t1 - t0 : t1 + 3 - t0; // o clipe tem 3 s e repete (medir menos que 3 s)
+            return ((player.FramesDrawn - d0) / clock.Elapsed.TotalSeconds, moved / clock.Elapsed.TotalSeconds);
+        }
+        using (var self = System.Diagnostics.Process.GetCurrentProcess())
+        {
+            var p = Priorities.Read(self);
+            Check("o MK Vision acima do normal", p.cpu == System.Diagnostics.ProcessPriorityClass.AboveNormal && p.gpu == Priorities.GpuAboveNormal, Priorities.Text(p));
+        }
+        player.Open(clip);
+        Wait(() => player.State.playing && player.State.fileTime > 0.5, 10);
+        Pump(1);
+        player.TestPacing = [];
+        var (draws, speed) = Measure(2);
+        var reasons = player.TestPacing;
+        player.TestPacing = null;
+        Check("vídeo de 30 quadros a 1x: ~30 desenhos por segundo", draws > 24 && draws < 40, $"{draws:0.0} desenhos/s ({string.Join(", ", reasons.Select(r => $"{r.Key} {r.Value}"))})");
+        Check("e o vídeo anda no tempo certo", Math.Abs(speed - 1) < 0.08, $"{speed:0.000} s de vídeo por segundo");
+        // Câmera lenta com IA (0,5x): toda atualização da tela.
+        player.TestEnsemble(false); // liga a câmera lenta com IA (e guarda)
+        for (int i = 0; i < 5; i++) PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x28, IntPtr.Zero); // ↓ 5x: 0,5x
+        bool slow = Wait(() => player.TestSlowActive, 120);
+        if (slow)
+        {
+            Pump(2);
+            (draws, speed) = Measure(2);
+            Check("câmera lenta com IA (0,5x): toda atualização da tela", draws > 50, $"{draws:0.0} desenhos/s, vídeo a {speed:0.00}x");
+        }
+        else Check("câmera lenta com IA ligou", false, "a IA não ficou pronta em 2 min");
+        // Modo ComfyUI.
+        player.TestComfyBusy = true;
+        Wait(() => player.TestComfyBusy, 3);
+        Pump(3); // o aviso do modo leve some (1,5 s) e a verificação de 2 em 2 s já viu o estado fingido
+        player.TestPacing = [];
+        (draws, speed) = Measure(2);
+        reasons = player.TestPacing;
+        player.TestPacing = null;
+        Check("ComfyUI gerando: IA rápida e sem a câmera lenta com IA", player.TestLightAi && !player.TestSlowActive && draws < 25,
+            $"IA rápida {player.TestLightAi}, câmera lenta com IA {player.TestSlowActive}, {draws:0.0} desenhos/s (vídeo a 0,5x: ~15; {string.Join(", ", reasons.Select(r => $"{r.Key} {r.Value}"))}; aviso: \"{player.TestOsdText}\")");
+        player.TestComfyBusy = false;
+        Wait(() => !player.TestComfyBusy, 3);
+        bool back = Wait(() => player.TestSlowActive, 60);
+        Check("ComfyUI terminou: tudo de volta", !player.TestLightAi && back, $"IA rápida {player.TestLightAi}, câmera lenta com IA {player.TestSlowActive}");
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x08, IntPtr.Zero); // Backspace: 1x
+        Pump(0.5);
+
+        if (comfy)
+        {
+            // O ComfyUI de verdade: liga (se preciso) e confere os processos dele.
+            var task = ComfyClient.EnsureRunning(_ => { }, CancellationToken.None);
+            Wait(() => task.IsCompleted, 300);
+            Pump(3); // os filhos do lançador recebem a prioridade nos primeiros segundos
+            var processes = ComfyClient.PythonProcesses();
+            var texts = processes.Select(p => $"{p.Id}: {Priorities.Text(Priorities.Read(p))}").ToList();
+            bool low = processes.Count > 0 && processes.All(p => Priorities.Read(p) is { cpu: System.Diagnostics.ProcessPriorityClass.BelowNormal, io: Priorities.IoLow, gpu: Priorities.GpuBelowNormal });
+            Check("ComfyUI abaixo do normal (processador, disco e placa)", task.IsCompletedSuccessfully && low, task.IsFaulted ? task.Exception!.GetBaseException().Message : string.Join("; ", texts));
+        }
+        player.Dispose();
+        Console.WriteLine(failures == 0 ? "tudo certo" : $"{failures} falha(s)");
+        return failures == 0 ? 0 : 1;
+    }
+
     public static int Tabs(string folder)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;

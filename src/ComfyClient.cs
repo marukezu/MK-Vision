@@ -230,10 +230,77 @@ internal static class ComfyClient
         catch { return false; }
     }
 
+    // ---------- Prioridades e "gerando agora" ----------
+
+    // O ComfyUI abaixo do normal (processador, disco e placa: Priorities): gerando, usa o que estiver livre, mas o
+    // Windows, o MK Vision e o OWL3D passam na frente — o disco a 100% não trava mais o resto. Sem argumento: os
+    // Python da pasta do ComfyUI (o nosso e um aberto pelo run_comfyui.bat). Cada processo uma vez.
+    private static readonly Dictionary<int, bool> Tamed = []; // processo → já com as três prioridades
+
+    public static void Tame(Process? process = null)
+    {
+        var targets = process is not null ? [process] : PythonProcesses();
+        foreach (var p in targets)
+        {
+            try
+            {
+                bool before;
+                lock (Tamed)
+                    if (Tamed.TryGetValue(p.Id, out before) && before) continue;
+                // A da placa só pega depois que o processo abre a placa: sem ela, tenta de novo na próxima vez.
+                bool ok = Priorities.Lower(p);
+                lock (Tamed) Tamed[p.Id] = ok;
+                if (ok || !Tamed.ContainsKey(-p.Id))
+                {
+                    Log.Write($"Comfy: processo {p.Id} com prioridade baixa ({Priorities.Text(Priorities.Read(p))}){(ok ? "" : ", a da placa depois")}.");
+                    lock (Tamed) Tamed[-p.Id] = true; // já avisou no log
+                }
+            }
+            catch (Exception error) { Log.Write($"Comfy: não consegui baixar a prioridade do processo {p.Id} — {error.Message}"); }
+        }
+    }
+
+    // Os python.exe que rodam da pasta do ComfyUI.
+    public static List<Process> PythonProcesses()
+    {
+        var found = new List<Process>();
+        foreach (var p in Process.GetProcessesByName("python"))
+        {
+            try
+            {
+                if (p.MainModule?.FileName is { } file && file.StartsWith(Folder, StringComparison.OrdinalIgnoreCase)) found.Add(p);
+                else p.Dispose();
+            }
+            catch { p.Dispose(); } // de outro usuário ou já fechou
+        }
+        return found;
+    }
+
+    // O ComfyUI está gerando agora (algo rodando ou na fila)? false também se ele estiver fechado. Rápido: só pergunta
+    // ao servidor local, e desiste em menos de 1 s.
+    public static async Task<bool> Busy()
+    {
+        try
+        {
+            using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(800));
+            using var response = await Http.GetAsync("queue", cancel.Token);
+            if (!response.IsSuccessStatusCode) return false;
+            var queue = JsonNode.Parse(await response.Content.ReadAsStringAsync(cancel.Token));
+            return (queue?["queue_running"] as JsonArray)?.Count > 0 || (queue?["queue_pending"] as JsonArray)?.Count > 0;
+        }
+        catch { return false; }
+    }
+
+    public static bool Installed => Directory.Exists(Folder);
+
     // Garante o servidor no ar: liga escondido se preciso e espera responder (até 4 min; a 1ª vez demora mais).
     public static async Task EnsureRunning(Action<string> status, CancellationToken token)
     {
-        if (await Online()) return;
+        if (await Online())
+        {
+            Tame(); // aberto pelo run_comfyui.bat: também abaixo do normal
+            return;
+        }
         string python = Path.Combine(Folder, ".venv", "Scripts", "python.exe");
         if (!File.Exists(python)) throw new InvalidOperationException($"Não achei o ComfyUI em {Folder}");
         string args = LaunchArguments();
@@ -249,6 +316,7 @@ internal static class ComfyClient
             if (await Online())
             {
                 Log.Write($"Comfy: servidor no ar em {clock.Elapsed.TotalSeconds:0} s.");
+                Tame(); // no ar = já abriu a placa: agora a prioridade dela pega
                 return;
             }
             status($"Ligando o ComfyUI... {clock.Elapsed.TotalSeconds:0} s");
@@ -290,6 +358,7 @@ internal static class ComfyClient
         var process = Process.Start(info) ?? throw new InvalidOperationException("Não consegui ligar o ComfyUI");
         if (_job != IntPtr.Zero && !AssignProcessToJobObject(_job, process.Handle))
             Log.Write("Comfy: o ComfyUI ligou, mas sem o vínculo com o app (pode continuar aberto depois).");
+        Tame(process);
         // O python.exe da .venv é só um lançador: o Python de verdade é um processo filho, que pode nascer antes do
         // vínculo acima (aí não entraria no job). Vincula os filhos que aparecerem nos primeiros segundos.
         if (_job != IntPtr.Zero)
@@ -305,6 +374,7 @@ internal static class ComfyClient
                         {
                             using var p = Process.GetProcessById(child);
                             if (!AssignProcessToJobObject(_job, p.Handle)) Log.Write($"Comfy: o processo {child} ficou sem o vínculo com o app.");
+                            Tame(p);
                         }
                     await Task.Delay(250);
                 }

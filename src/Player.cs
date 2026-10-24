@@ -301,6 +301,7 @@ internal sealed partial class Player : IDisposable
         _analysisThread.Start();
         Log.Write($"Player aberto (versão {Updater.Current}): arraste um vídeo para a janela ou use Ctrl+O.");
         ScheduleUpdateCheck(); // versão nova no GitHub? (PlayerUpdate)
+        StartPerformance();    // prioridades e o modo ComfyUI (PlayerPerformance)
     }
 
     // ---------- Abrir ----------
@@ -545,7 +546,9 @@ internal sealed partial class Player : IDisposable
                 frame.Time = time + _loopOffset;
                 _lastQueuedTime = frame.Time;
                 _queue.Add(frame);
-                _dirty = true;
+                // Tocando, o quadro aparece quando a hora dele chegar (PlayerPerformance); "mudou" só parado ou no
+                // primeiro quadro (abriu, pulou) — senão cada quadro decodificado redesenharia a tela à toa.
+                if (!_playing || _queue.Count == 1) _dirty = true;
             }
             _renderWake.Set();
             _analysisWake.Set();
@@ -884,6 +887,14 @@ internal sealed partial class Player : IDisposable
                 _renderWake.WaitOne(100); // pausado: só redesenha quando algo muda
                 continue;
             }
+            // Tocando sem nada mudando além do vídeo: só desenha quando há quadro novo (PlayerPerformance). Senão espera
+            // a próxima atualização da tela sem desenhar — a placa, o Windows e quem captura a tela (o OWL3D) ficam
+            // com 30 quadros por segundo num vídeo de 30, em vez de 144.
+            if (!dirty && SkipThisRefresh())
+            {
+                WaitRefresh();
+                continue;
+            }
             if (Native.IsIconic(Hwnd))
             {
                 Thread.Sleep(50);
@@ -937,6 +948,7 @@ internal sealed partial class Player : IDisposable
                     freed = true;
                 }
                 frame = _queue.Count > 0 ? _queue[0] : null;
+                (_drawnFrame, _drawnSerial) = (frame, frame?.Serial ?? -1); // o quadro do vídeo desta vez (SkipThisRefresh)
                 // Versões da imagem (IA de fotos / ComfyUI, PlayerPhotoAi): a escolhida no lugar do quadro (ou da foto), até
                 // dar play, pular ou abrir outra.
                 if (HasLayers && (_playing || frame?.Serial != _stillSerial || (_file is null && !_image))) DisposeStill();
@@ -1054,7 +1066,8 @@ internal sealed partial class Player : IDisposable
             {
                 double gap = (now - _diagLastPresent) * 1000;
                 _diagMaxGap = Math.Max(_diagMaxGap, gap);
-                if (gap > 40) _diagGaps++;
+                // Pausa de verdade: mais que um quadro do vídeo (desenhando só no ritmo dele, 24 quadros = 42 ms é normal).
+                if (gap > Math.Max(40, _frameDuration / Math.Max(_speed, 0.1) * 1000 + 12)) _diagGaps++;
             }
             _diagLastPresent = now;
             _diagFrames++;
@@ -1746,12 +1759,13 @@ internal sealed partial class Player : IDisposable
     {
         if (RifeHost.Started) return;
         if (!NvidiaPack.Installed) return; // sem as IAs da NVIDIA (PlayerNvidia): o vídeo fica lento sem quadros novos
+        if (_comfyBusy) return;            // o ComfyUI está gerando (PlayerPerformance): liga quando ele terminar
         RifeHost.Start(_prefs.TrainedModel);
         RifeHost.Use(_prefs.TrainedModel);
     }
 
     // Com _lock.
-    private bool SlowActive() => _smooth && _speed < 0.999 && _file is not null && RifeHost.Instance is not null;
+    private bool SlowActive() => _smooth && _speed < 0.999 && _file is not null && RifeHost.Instance is not null && !_comfyBusy; // ComfyUI gerando: pausa
 
     // Situação do RTX Video, para o painel de ajustes (aba Ampliação).
     private string ZoomStatus()
@@ -1965,6 +1979,7 @@ internal sealed partial class Player : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _comfyPoll?.Dispose(); // PlayerPerformance
         _running = false;
         _decodeWake.Set();
         _renderWake.Set();
