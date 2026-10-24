@@ -256,6 +256,7 @@ internal sealed partial class Player
     // Tecla I: melhora com a IA de fotos a base escolhida (original ou a do ComfyUI). Já melhorada com este modelo: só liga.
     private void EnhanceShown()
     {
+        if (NeedNvidiaPack()) return; // sem as bibliotecas da NVIDIA: pergunta se baixa (PlayerNvidia)
         int model = _prefs.PhotoAi;
         if (model == 0)
         {

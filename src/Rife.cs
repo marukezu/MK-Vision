@@ -18,7 +18,7 @@ internal sealed class Rife : IDisposable
     public const string MaskOutput = "/Sigmoid_output_0"; // [1, 1, Hp, Wp]: peso do quadro A
 
     private static readonly string AppData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MKVisionDesktop");
-    public static readonly string NvidiaDir = Path.Combine(AppData, "nvidia");
+    public static readonly string NvidiaDir = Environment.GetEnvironmentVariable("MKV_NVIDIA_DIR") ?? Path.Combine(AppData, "nvidia"); // autoteste: outra pasta
     private static readonly string CacheDir = Path.Combine(AppData, "trt-cache");
 
     private readonly InferenceSession _session;

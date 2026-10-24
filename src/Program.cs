@@ -58,6 +58,10 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--playermenutest") return WebBrowserTest.PlayerMenu(args[1]);
         if (args.Length == 2 && args[0] == "--croptest") return WebBrowserTest.Crop(args[1]);
         if (args.Length == 2 && args[0] == "--webmenutest") return WebBrowserTest.WebMenu(args[1]);
+        if (args.Length == 1 && args[0] == "--nvidiapacktest") return NvidiaPack.Test();
+        if (args.Length == 1 && args[0] == "--updatetest") return Updater.Test();
+        if (args.Length == 2 && args[0] == "--updateflowtest") return WebBrowserTest.UpdateFlow(args[1]);
+        if (args.Length == 1 && args[0] == "--nvidiapackdownload") return NvidiaPack.DownloadTest();
         if (args.Length == 2 && args[0] == "--webopenbuttontest") return WebBrowserTest.WebOpenButton(args[1]);
         if (args.Length == 2 && args[0] == "--webfullscreentest") return WebBrowserTest.WebFullscreen(args[1]);
         if (args.Length == 2 && args[0] == "--promptboxtest") return PromptBoxTest.Run(args[1]);

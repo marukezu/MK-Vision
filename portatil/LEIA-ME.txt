@@ -1,4 +1,4 @@
-MK Vision Desktop — versão para teste
+MK Vision Desktop
 
 Como abrir
   Abra o MKVisionDesktop.exe desta pasta. Não precisa instalar nada (o .NET já vem junto).
@@ -8,10 +8,17 @@ Aviso do Windows
   Como o programa não é assinado, o Windows pode mostrar "O Windows protegeu o computador".
   Clique em "Mais informações" e depois em "Executar assim mesmo".
 
-O que não funciona nesta versão
-  A IA de fotos (tecla I), a câmera lenta com IA e a IA de luz e cor precisam de arquivos da NVIDIA
-  que não vieram junto (são 4,4 GB). O player, o navegador e o resto funcionam normalmente.
+IAs da NVIDIA
+  A IA de fotos (tecla I), a câmera lenta com IA e a luz e cor na placa precisam de bibliotecas da NVIDIA
+  (CUDA, cuDNN e TensorRT). Numa placa NVIDIA, o app pergunta se pode baixá-las na primeira vez que você
+  usar uma IA (cerca de 3 GB, uma vez só, direto da NVIDIA). Em outras placas, o player e o navegador
+  funcionam normalmente; só essas IAs ficam desligadas.
+
+Atualizações
+  O app avisa quando sai uma versão nova: botão direito na imagem (ou menu Arquivo) → "Atualizar para a
+  versão ...". Ele baixa, fecha e abre de novo já atualizado. Versões e novidades:
+  https://github.com/marukezu/MK-Vision/releases
 
 Onde ficam os dados
-  Configurações, favoritos e o perfil do navegador ficam em %LOCALAPPDATA%\MKVisionDesktop.
-  Para apagar tudo depois do teste, apague esta pasta e essa outra.
+  Configurações, favoritos, o perfil do navegador e as IAs da NVIDIA ficam em %LOCALAPPDATA%\MKVisionDesktop.
+  Para apagar tudo, apague esta pasta e essa outra.

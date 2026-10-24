@@ -299,7 +299,8 @@ internal sealed partial class Player : IDisposable
         _decodeThread.Start();
         _renderThread.Start();
         _analysisThread.Start();
-        Log.Write("Player aberto: arraste um vídeo para a janela ou use Ctrl+O.");
+        Log.Write($"Player aberto (versão {Updater.Current}): arraste um vídeo para a janela ou use Ctrl+O.");
+        ScheduleUpdateCheck(); // versão nova no GitHub? (PlayerUpdate)
     }
 
     // ---------- Abrir ----------
@@ -1744,6 +1745,7 @@ internal sealed partial class Player : IDisposable
     private void StartSlowAi()
     {
         if (RifeHost.Started) return;
+        if (!NvidiaPack.Installed) return; // sem as IAs da NVIDIA (PlayerNvidia): o vídeo fica lento sem quadros novos
         RifeHost.Start(_prefs.TrainedModel);
         RifeHost.Use(_prefs.TrainedModel);
     }
@@ -1769,7 +1771,8 @@ internal sealed partial class Player : IDisposable
         lock (_lock)
         {
             if (!_smooth) return "Desligada: abaixo de 1x o vídeo fica só mais lento, sem quadros novos.";
-            if (RifeHost.Instance is null) return "Carregando a IA de quadros...";
+            if (RifeHost.Instance is null)
+                return NvidiaPack.Installed ? "Carregando a IA de quadros..." : "Precisa das IAs da NVIDIA (botão direito na imagem → Baixar as IAs da NVIDIA).";
             string ai = RifeHost.UsingTrained ? "IA treinada" : "IA original";
             if (_file is null || _speed >= 0.999) return $"Pronta ({ai}): entra quando a velocidade fica abaixo de 1x (seta para baixo).";
             return $"Agora: {Dot(_speed, "0.##")}x · {ai}" + (_slowInfo != "" ? $" · {_slowInfo}" : "");

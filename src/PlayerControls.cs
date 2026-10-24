@@ -604,6 +604,9 @@ internal sealed partial class Player
         AppendMenu(menu, 0, 3, registered ? "Escolher o MK Vision como player padrão..." : "Tornar o MK Vision o player de vídeos padrão...");
         if (registered) AppendMenu(menu, 0, 4, "Remover o MK Vision dos players de vídeo");
         AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
+        if (UpdateMenuText() is { } update) AppendMenu(menu, 0, 5, update);
+        AppendMenu(menu, 0x1 | 0x2 /* MF_GRAYED | MF_DISABLED */, 0, $"MK Vision {Updater.Current}");
+        AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
         AppendMenu(menu, 0, 2, "Sair");
         var point = new Native.POINT { X = _menuFileRect.Left, Y = _menuFileRect.Bottom };
         Native.ClientToScreen(Hwnd, ref point);
@@ -611,6 +614,7 @@ internal sealed partial class Player
         DestroyMenu(menu);
         if (command == 1) ShowOpenDialog();
         else if (command == 2) PostMessage(Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        else if (command == 5) StartUpdate();
         else if (command == 3)
         {
             try

@@ -46,12 +46,16 @@ internal sealed partial class Player
         Action Key(int key) => () => OnKey(key); // o mesmo que a tecla (avisos e tudo)
         static MenuEntry Section(string name) => new(name, Header: true);
         var back = new MenuEntry("Voltar para o navegador\tF2", () => ShowWeb(true));
-        if (!video && !photo) return [back, MenuSeparator, new("Abrir...\tCtrl+O", ShowOpenDialog)];
+        // Versão nova no GitHub (PlayerUpdate): logo abaixo do navegador.
+        MenuEntry[] update = UpdateMenuText() is { } u ? [new(u, StartUpdate)] : [];
+        if (!video && !photo) return [back, .. update, MenuSeparator, new("Abrir...\tCtrl+O", ShowOpenDialog)];
         // Cortando (F4): só o que vale nele.
         if (cropping) return [new("Aceitar o corte\tEnter", AcceptCrop), new("Cancelar o corte\tEsc", CancelCrop), MenuSeparator,
             new("Imagem inteira", () => CropAction(CropActFull))];
 
-        var entries = new List<MenuEntry> { back, MenuSeparator, Section("Arquivo") };
+        var entries = new List<MenuEntry> { back };
+        entries.AddRange(update);
+        entries.AddRange([MenuSeparator, Section("Arquivo")]);
         entries.Add(new(video ? "Salvar o quadro como imagem\tCtrl+S" : "Salvar imagem\tCtrl+S", SavePhotoAi));
         if (video) entries.Add(new("Salvar vídeo\tShift+S", SaveVideo));
         if (local is not null) entries.Add(new("Mostrar no Explorer", () => ShowInExplorer(local)));
@@ -66,6 +70,7 @@ internal sealed partial class Player
         entries.Add(new("Desenhar / marcar área\tF3", ToggleAnnotate, annotating));
         entries.Add(new("Cortar\tF4", ToggleCrop));
         entries.Add(new("Melhorar com a IA de fotos\tI", EnhanceShown));
+        if (PackMenuEntry() is { } pack) entries.Add(pack);
 
         entries.AddRange([MenuSeparator, Section("Efeitos")]);
         if (comfyShown) entries.Add(new(showComfy ? "Ver a original\tT" : "Ver a resposta do ComfyUI\tT", Key('T')));

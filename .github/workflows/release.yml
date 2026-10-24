@@ -1,0 +1,53 @@
+# Publica uma versão: ao enviar uma tag v* (ex.: v1.0.1-beta), compila o app com o .NET embutido, monta o .zip (a
+# pasta "MK Vision Desktop", como a do "Gerar pasta portatil.bat") e cria a Release com ele. Os apps já instalados
+# acham a versão nova por aqui e se atualizam (Updater.cs). Tag com "-" (beta, rc...) = pré-lançamento.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compilar
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          dotnet publish src -c Release -r win-x64 --self-contained true -p:DebugType=none -p:Version=$version -nologo -o "dist/MK Vision Desktop"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item portatil/LEIA-ME.txt "dist/MK Vision Desktop/LEIA-ME.txt"
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Compactar
+        shell: pwsh
+        run: |
+          Set-Location dist
+          7z a -tzip -mx=7 "MK-Vision-Desktop-$env:VERSION.zip" "MK Vision Desktop" | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Item *.zip | ForEach-Object { "{0}: {1:N0} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Notas da versão
+        shell: pwsh
+        run: |
+          $message = git log -1 --format=%B
+          $notes = ($message | Where-Object { $_ -notmatch '^Co-Authored-By:' }) -join "`n"
+          $notes += "`n`n**Como usar:** baixe o .zip abaixo, descompacte e abra o MKVisionDesktop.exe. Quem já tem o app recebe esta versão pelo aviso de atualização."
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: MK Vision Desktop ${{ github.ref_name }}
+          body_path: notes.md
+          files: dist/*.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}

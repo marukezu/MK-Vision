@@ -1,0 +1,5 @@
+# Arquivos binários: o git não mexe (sem conversão de fim de linha, sem diff de texto)
+*.onnx binary
+*.ico binary
+*.png binary
+*.jpg binary

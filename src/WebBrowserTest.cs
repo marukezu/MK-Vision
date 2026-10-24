@@ -2559,6 +2559,43 @@ internal static class WebBrowserTest
         return failures == 0 ? 0 : 1;
     }
 
+    // --updateflowtest <pasta>: a atualização de ponta a ponta, fingindo ser a versão 1.0.0-beta e com a "pasta do app"
+    // em <pasta>\app: acha a versão nova no GitHub, baixa o .zip, fecha e o script copia por cima (sem abrir de novo).
+    // Depois de sair, confira <pasta>\app: o MKVisionDesktop.exe novo e o "fica.txt" (o que não vem no .zip) intacto.
+    public static int UpdateFlow(string folder)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        string app = Path.Combine(folder, "app");
+        Directory.CreateDirectory(Path.Combine(app, "Models", "rife"));
+        File.WriteAllText(Path.Combine(app, "Models", "rife", "fica.txt"), "o que não vem no .zip fica");
+        Environment.SetEnvironmentVariable("MKV_VERSION", "1.0.0-beta");
+        Environment.SetEnvironmentVariable("MKV_UPDATE_DIR", app);
+        Environment.SetEnvironmentVariable("MKV_UPDATE_NORESTART", "1");
+        using var gpu = new Gpu();
+        void Pump(double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                while (Native.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1)) { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
+                Thread.Sleep(5);
+            }
+        }
+        var player = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (player.TestUpdateVersion is null && clock.Elapsed.TotalSeconds < 30) Pump(0.2);
+        Console.WriteLine($"{(player.TestUpdateVersion is not null ? "OK    " : "FALHOU")} versão nova achada: {player.TestUpdateVersion ?? "nenhuma"} (esta: {Updater.Current})");
+        if (player.TestUpdateVersion is null) return 1;
+        Console.WriteLine($"menu: {string.Join(" | ", player.TestMenu().Take(2))}");
+        player.TestUpdateAnswer = true;
+        player.TestStartUpdate();
+        // Baixa e fecha sozinho (WM_CLOSE); o script espera este processo sair para copiar.
+        clock.Restart();
+        while (!player.TestClosed && clock.Elapsed.TotalSeconds < 600) Pump(0.5);
+        Console.WriteLine($"{(player.TestClosed ? "OK    " : "FALHOU")} baixou e fechou em {clock.Elapsed.TotalSeconds:0} s");
+        return player.TestClosed ? 0 : 1;
+    }
+
     public static int Tabs(string folder)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
