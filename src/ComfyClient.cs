@@ -488,8 +488,11 @@ internal static class ComfyClient
     // texto de andamento. Sem imagem (bgra = null): "do zero", só pelo texto — sem a imagem 1 e sem a LoRA de
     // consistência (ela serve para manter a imagem de entrada); o Qwen 2.1 gera quadrada (resolution × resolution).
     // "second": o arquivo da imagem 2 (abas com SecondImage).
+    // "steps": o andamento dos passos (StepInfo), quando o modelo já está agindo; "progress" recebe o resto (enviando,
+    // na fila, preparando o modelo).
     public static async Task<ComfyResult> Run(string workflowName, byte[]? bgra, int w, int h, string prompt, string negative,
-        IReadOnlyList<LoraSetting>? loras, SamplerSetting? settings, Action<string> progress, CancellationToken token, string? second = null)
+        IReadOnlyList<LoraSetting>? loras, SamplerSetting? settings, Action<string> progress, CancellationToken token, string? second = null,
+        Action<StepInfo>? onStep = null)
     {
         await EnsureRunning(progress, token);
         string clientId = Guid.NewGuid().ToString("N");
@@ -544,7 +547,9 @@ internal static class ComfyClient
         Log.Write($"Comfy: na fila ({promptId}), {steps} passos, seed {seed}.");
         progress("Na fila do ComfyUI...");
 
-        if (live) await Follow(socket, promptId, steps, stages, progress, token);
+        // Passos de cada sampler (Wan: cada um faz um trecho), para o tempo restante somar as etapas que faltam.
+        var stageSteps = stages.Select(id => StageSteps(api[id]!["inputs"]!.AsObject())).ToList();
+        if (live) await Follow(socket, promptId, steps, stages, stageSteps, progress, onStep, token);
         else await Poll(promptId, progress, token);
 
         // 4. Resultado: a imagem da prévia (pasta temp do ComfyUI).
@@ -750,12 +755,45 @@ internal static class ComfyClient
     public static void RememberFile(string path) => Remember("temp", path);
 
     // "stages": os samplers na ordem em que rodam (Wan: HIGH, LOW...) — o andamento mostra a etapa de cada um.
-    private static async Task Follow(ClientWebSocket socket, string promptId, int steps, List<string> stages, Action<string> progress,
-        CancellationToken token)
+    // O andamento de um passo: etapa (sampler) e passo dela, o tempo desde que o ComfyUI começou este pedido (a fila
+    // não conta; o carregamento do modelo, sim), segundos por passo e quanto falta (NaN = ainda não dá para saber).
+    public sealed record StepInfo(int Stage, int Stages, int Step, int Steps, double Elapsed, double SecondsPerStep, double Remaining)
+    {
+        public double Fraction => Steps <= 0 ? 0 : Math.Clamp(((Stage - 1) + Step / (double)Steps) / Math.Max(1, Stages), 0, 1);
+    }
+
+    // Quantos passos um sampler faz: o KSampler, todos; o avançado (Wan), do início ao fim dele.
+    private static int StageSteps(JsonObject inputs)
+    {
+        static int Int(JsonNode? node, int fallback) => node is JsonValue v && v.TryGetValue<int>(out int n) ? n : fallback;
+        int total = Int(inputs["steps"], 0);
+        int start = Int(inputs["start_at_step"], 0), end = Math.Min(Int(inputs["end_at_step"], total), total);
+        return Math.Max(1, end - start);
+    }
+
+    private static async Task Follow(ClientWebSocket socket, string promptId, int steps, List<string> stages, List<int> stageSteps,
+        Action<string> progress, Action<StepInfo>? steps2, CancellationToken token)
     {
         var buffer = new byte[1 << 16];
         using var message = new MemoryStream();
         var clock = Stopwatch.StartNew();
+        // O relógio do pedido começa quando o ComfyUI começa a trabalhar nele (execution_start); a média dos segundos por
+        // passo, do 1º passo de cada etapa em diante (o 1º costuma ser mais lento).
+        var work = new Stopwatch();
+        double firstAt = -1, perStep = double.NaN;
+        int currentStage = -1, firstValue = 0;
+        void Report(int stage, int stages, int value, int max)
+        {
+            if (!work.IsRunning) work.Start(); // (sem o execution_start: do 1º aviso)
+            double now = work.Elapsed.TotalSeconds;
+            if (stage != currentStage) (currentStage, firstAt) = (stage, -1);
+            if (firstAt < 0) (firstAt, firstValue) = (now, value); // o 1º passo visto da etapa (fica fora da média)
+            if (value > firstValue) perStep = (now - firstAt) / (value - firstValue);
+            double later = 0;
+            for (int i = stage; i < stages && i < stageSteps.Count; i++) later += stageSteps[i];
+            double remaining = double.IsNaN(perStep) ? double.NaN : perStep * (Math.Max(0, max - value) + later);
+            steps2?.Invoke(new StepInfo(stage, stages, value, max, now, perStep, remaining));
+        }
         while (socket.State == WebSocketState.Open)
         {
             message.SetLength(0);
@@ -772,6 +810,7 @@ internal static class ComfyClient
             switch (json?["type"]?.GetValue<string>())
             {
                 case "execution_start":
+                    work.Restart(); // saiu da fila do ComfyUI: o tempo do pedido começa a contar
                     progress("ComfyUI: preparando o modelo na placa...");
                     break;
                 case "progress":
@@ -780,10 +819,16 @@ internal static class ComfyClient
                     if (stages.Count > 1 && stages.IndexOf(node) is int stage and >= 0)
                     {
                         // Vários samplers (Wan): cada um faz um trecho dos passos.
-                        progress($"ComfyUI: etapa {stage + 1}/{stages.Count} · {value}/{max} · {clock.Elapsed.TotalSeconds:0} s");
+                        if (steps2 is not null) Report(stage + 1, stages.Count, value, max);
+                        else progress($"ComfyUI: etapa {stage + 1}/{stages.Count} · {value}/{max} · {clock.Elapsed.TotalSeconds:0} s");
                         break;
                     }
                     if (max != steps) break; // outro nó com andamento (não o sampler)
+                    if (steps2 is not null)
+                    {
+                        Report(1, 1, value, max);
+                        break;
+                    }
                     if (value <= 1) clock.Restart(); // o sampler começou: a estimativa conta do 1º passo
                     double left = value > 1 ? clock.Elapsed.TotalSeconds * (max - value) / (value - 1) : -1;
                     progress($"ComfyUI: {value}/{max} passos" + (left >= 0 ? $" · falta ~{Math.Ceiling(left):0} s" : ""));

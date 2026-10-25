@@ -18,7 +18,7 @@ namespace MKVision.Desktop;
 // O mouse é tratado na thread principal; o desenho (UiCanvas → camada sobre o vídeo), na thread da tela.
 internal sealed partial class Player
 {
-    private enum UiPart { None, Video, Seek, Play, Volume, VolumeSlider, Fullscreen, BottomBar, TopBar, MenuFile, MenuSettings, MenuWeb, List, ListItem, TreeItem, NavBack, NavForward, NavUp,
+    private enum UiPart { None, Video, Seek, Play, Volume, VolumeSlider, Fullscreen, BottomBar, TopBar, PlayerTab, PlayerTabClose, List, ListItem, TreeItem, NavBack, NavForward, NavUp,
         WebBack, WebForward, WebReload, WebAddress, WebAuto, WebPlayer, WebTab, WebTabClose, WebNewTab, WebStar,
         WebBookmark, WebBookmarksMore, WebBookmarkBar, WebShield, WebSiteIcon, WebSettings, WebTabAudio, WebTabsLeft, WebTabsRight, WebZoom, WebTranslate }
 
@@ -88,7 +88,6 @@ internal sealed partial class Player
     private int _pressX, _pressY;
     private double _seekPreview;
     private long _lastSeekRequest;
-    private Native.RECT _menuFileRect, _menuSettingsRect, _menuWebRect; // calculados ao desenhar o topo
     private bool _listOpen;
     private int _listScroll = -1;   // primeira linha visível (-1 = posicionar no vídeo atual ao abrir)
     private ThumbnailCache? _thumbs;
@@ -97,9 +96,9 @@ internal sealed partial class Player
     private const string IconBack = "\uE72B", IconForward = "\uE72A", IconUp = "\uE74A";
 
     // Desenho da interface (thread da tela).
-    private UiCanvas? _bottomCanvas, _topCanvas, _hintCanvas, _listCanvas;
-    private ID3D11ShaderResourceView? _bottomLayer, _topLayer, _hintLayer, _listLayer;
-    private string _bottomKey = "", _topKey = "", _hintKey = "", _listKey = "";
+    private UiCanvas? _bottomCanvas, _hintCanvas, _listCanvas;
+    private ID3D11ShaderResourceView? _bottomLayer, _hintLayer, _listLayer;
+    private string _bottomKey = "", _hintKey = "", _listKey = "";
     private IntPtr _fontText, _fontIcons, _fontMenu, _fontHint;
 
     // Aviso rápido do último comando (canto superior esquerdo).
@@ -249,20 +248,21 @@ internal sealed partial class Player
             }
             return UiPart.BottomBar;
         }
-        if (y < U(TopHeight))
+        if (y < U(TopHeight) && _mediaTabs.Count > 0)
         {
-            if (Inside(_menuFileRect, x, y)) return UiPart.MenuFile;
-            if (Inside(_menuWebRect, x, y)) return UiPart.MenuWeb;
-            if (Inside(_menuSettingsRect, x, y)) return UiPart.MenuSettings;
-            return UiPart.TopBar;
+            // A faixa das abas (PlayerTabs).
+            var (index, close) = TabAt(x, y);
+            _tabHover = index;
+            return index < 0 ? UiPart.TopBar : close ? UiPart.PlayerTabClose : UiPart.PlayerTab;
         }
+        _tabHover = -1;
         return UiPart.Video;
     }
 
     private static bool Inside(Native.RECT r, int x, int y) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
 
     private bool BottomVisible() => _file is not null && !_cropping && (_seekDragging || _volumeDragging || (_mouseInside && _mouseY >= _clientH - U(BarHeight)));
-    private bool TopVisible() => _mouseInside && !_cropping && !_seekDragging && !_volumeDragging && _mouseY >= 0 && _mouseY < U(TopHeight);
+    private bool TopVisible() => _mouseInside && _mediaTabs.Count > 0 && !_cropping && !_seekDragging && !_volumeDragging && _mouseY >= 0 && _mouseY < U(TopHeight);
 
     // ---------- Mouse (thread principal) ----------
 
@@ -432,15 +432,14 @@ internal sealed partial class Player
             case UiPart.Fullscreen:
                 ToggleFullscreen();
                 break;
-            case UiPart.MenuFile:
-                ShowFileMenu();
+            case UiPart.PlayerTab or UiPart.PlayerTabClose:
+            {
+                int index;
+                lock (_lock) index = _tabHover;
+                if (part == UiPart.PlayerTabClose) CloseTab(index);
+                else SwitchTab(index);
                 break;
-            case UiPart.MenuSettings:
-                _panel?.Toggle();
-                break;
-            case UiPart.MenuWeb:
-                ShowWeb(true);
-                break;
+            }
             case UiPart.WebBack or UiPart.WebForward or UiPart.WebReload or UiPart.WebAddress or UiPart.WebAuto or UiPart.WebPlayer
                 or UiPart.WebTab or UiPart.WebTabClose or UiPart.WebNewTab or UiPart.WebStar or UiPart.WebBookmarksMore
                 or UiPart.WebShield or UiPart.WebSettings or UiPart.WebTabAudio or UiPart.WebTabsLeft or UiPart.WebTabsRight or UiPart.WebZoom or UiPart.WebTranslate:
@@ -469,7 +468,7 @@ internal sealed partial class Player
                 if (isFolder) _renderWake.Set();
                 else if (file is not null)
                 {
-                    Open(file);
+                    OpenTab(file);
                     lock (_lock) _browseSyncedTo = file; // a árvore já está nesta pasta
                 }
                 break;
@@ -595,53 +594,6 @@ internal sealed partial class Player
         _prefs.Muted = _prefs.Volume <= 0;
     }
 
-    private void ShowFileMenu()
-    {
-        var menu = CreatePopupMenu();
-        AppendMenu(menu, 0, 1, "Abrir vídeo...\tCtrl+O");
-        AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
-        bool registered = FileAssociation.IsRegistered();
-        AppendMenu(menu, 0, 3, registered ? "Escolher o MK Vision como player padrão..." : "Tornar o MK Vision o player de vídeos padrão...");
-        if (registered) AppendMenu(menu, 0, 4, "Remover o MK Vision dos players de vídeo");
-        AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
-        if (UpdateMenuText() is { } update) AppendMenu(menu, 0, 5, update);
-        AppendMenu(menu, 0x1 | 0x2 /* MF_GRAYED | MF_DISABLED */, 0, $"MK Vision {Updater.Current}");
-        AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
-        AppendMenu(menu, 0, 2, "Sair");
-        var point = new Native.POINT { X = _menuFileRect.Left, Y = _menuFileRect.Bottom };
-        Native.ClientToScreen(Hwnd, ref point);
-        int command = TrackPopupMenu(menu, 0x100 /* TPM_RETURNCMD */, point.X, point.Y, 0, Hwnd, IntPtr.Zero);
-        DestroyMenu(menu);
-        if (command == 1) ShowOpenDialog();
-        else if (command == 2) PostMessage(Hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-        else if (command == 5) StartUpdate();
-        else if (command == 3)
-        {
-            try
-            {
-                FileAssociation.Register();
-                FileAssociation.OpenDefaultAppsSettings(); // a escolha final é da pessoa, na tela do Windows
-                Notify("Na tela do Windows, escolha o MK Vision como padrão");
-            }
-            catch (Exception error)
-            {
-                Notify($"Não consegui registrar: {error.Message}");
-            }
-        }
-        else if (command == 4)
-        {
-            try
-            {
-                FileAssociation.Unregister();
-                Notify("MK Vision removido dos players de vídeo");
-            }
-            catch (Exception error)
-            {
-                Notify($"Não consegui remover: {error.Message}");
-            }
-        }
-    }
-
     // ---------- Som (thread principal, ~10x por segundo) ----------
 
     private void SyncAudio()
@@ -723,7 +675,7 @@ internal sealed partial class Player
         if (!hasFile && !list) DrawHint(target, cw, ch); // com a lista aberta o texto ficaria embaralhado por baixo dela
         if (list) DrawFileList(target, listRect);
         if (bottom) DrawBottomBar(target, cw, ch, hover, seekHover, volumeOpen, playing, position, duration);
-        if (top) DrawTopBar(target, cw, hover);
+        if (top) DrawTabStrip(target, cw); // as abas (PlayerTabs)
         DrawOsd(target, top);
     }
 
@@ -772,35 +724,6 @@ internal sealed partial class Player
             _bottomLayer = c.Upload(_gpu);
         }
         _gpu.DrawOverlay(target, 0, ch - height, cw, height, _bottomLayer);
-    }
-
-    private void DrawTopBar(ID3D11RenderTargetView target, int cw, UiPart hover)
-    {
-        int height = U(TopHeight);
-        string key = $"{cw}|{hover}";
-        if (key != _topKey || _topLayer is null)
-        {
-            _topKey = key;
-            var c = _topCanvas ??= new UiCanvas();
-            c.Begin(cw, height);
-            c.Gradient(0.8f, 0f);
-            int textTop = (height - c.TextHeight(_fontMenu)) / 2, x = U(14);
-            Native.RECT Item(string text, UiPart part)
-            {
-                int w = c.TextWidth(text, _fontMenu);
-                var rect = new Native.RECT { Left = x - U(8), Top = U(5), Right = x + w + U(8), Bottom = height - U(5) };
-                if (hover == part) c.Rect(rect.Left, rect.Top, rect.Width, rect.Height, White, 0.15f);
-                c.Text(text, _fontMenu, x, textTop, White);
-                x += w + U(24);
-                return rect;
-            }
-            var file = Item("Arquivo", UiPart.MenuFile);
-            var settings = Item("Ajustes", UiPart.MenuSettings);
-            var web = Item("Navegador (F2)", UiPart.MenuWeb);
-            lock (_lock) (_menuFileRect, _menuSettingsRect, _menuWebRect) = (file, settings, web);
-            _topLayer = c.Upload(_gpu);
-        }
-        _gpu.DrawOverlay(target, 0, 0, cw, height, _topLayer);
     }
 
     private void DrawHint(ID3D11RenderTargetView target, int cw, int ch)
@@ -998,7 +921,7 @@ internal sealed partial class Player
     private void DisposeInterface()
     {
         _bottomCanvas?.Dispose();
-        _topCanvas?.Dispose();
+        _tabsCanvas?.Dispose();
         _hintCanvas?.Dispose();
         _listCanvas?.Dispose();
         _osdCanvas?.Dispose();

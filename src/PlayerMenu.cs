@@ -42,13 +42,14 @@ internal sealed partial class Player
             }
         }
         if (local is not null && (IsWeb(local) || IsWebKey(local) || !File.Exists(local))) local = null;
-        bool comfyRunning = _comfyJob is { IsCancellationRequested: false };
+        bool comfyRunning;
+        lock (_lock) comfyRunning = _activeTab is { } here && ComfyJobOf(here) is not null; // o pedido desta aba (gerando ou na fila)
         Action Key(int key) => () => OnKey(key); // o mesmo que a tecla (avisos e tudo)
         static MenuEntry Section(string name) => new(name, Header: true);
         var back = new MenuEntry("Voltar para o navegador\tF2", () => ShowWeb(true));
         // Versão nova no GitHub (PlayerUpdate): logo abaixo do navegador.
         MenuEntry[] update = UpdateMenuText() is { } u ? [new(u, StartUpdate)] : [];
-        if (!video && !photo) return [back, .. update, MenuSeparator, new("Abrir...\tCtrl+O", ShowOpenDialog)];
+        if (!video && !photo) return [back, .. update, MenuSeparator, new("Abrir...\tCtrl+O", ShowOpenDialog), DefaultPlayerEntry()];
         // Cortando (F4): só o que vale nele.
         if (cropping) return [new("Aceitar o corte\tEnter", AcceptCrop), new("Cancelar o corte\tEsc", CancelCrop), MenuSeparator,
             new("Imagem inteira", () => CropAction(CropActFull))];
@@ -64,6 +65,7 @@ internal sealed partial class Player
             entries.Add(new("Anterior da pasta\tPage Up", () => OpenSibling(-1)));
             entries.Add(new("Próximo da pasta\tPage Down", () => OpenSibling(1)));
         }
+        entries.Add(DefaultPlayerEntry()); // antes no menu Arquivo do topo (que saiu)
 
         entries.AddRange([MenuSeparator, Section("Edição e IA")]);
         entries.Add(comfyRunning ? new("Cancelar o ComfyUI\tShift+G", () => ComfyKey(cancel: true)) : new("Editar com o ComfyUI...\tG", () => ComfyKey(cancel: false)));
@@ -122,6 +124,37 @@ internal sealed partial class Player
             entries.Add(new("Câmera lenta", Sub: [.. slow]));
         }
         return entries;
+    }
+
+    // "Tornar o MK Vision o player padrão" (ou escolher de novo / remover): a tela do Windows decide. Antes ficava no menu
+    // Arquivo do topo (que saiu com as abas).
+    private MenuEntry DefaultPlayerEntry()
+    {
+        bool registered = FileAssociation.IsRegistered();
+        var choose = new MenuEntry(registered ? "Escolher o MK Vision como player padrão..." : "Tornar o MK Vision o player de vídeos padrão...", () =>
+        {
+            try
+            {
+                FileAssociation.Register();
+                FileAssociation.OpenDefaultAppsSettings(); // a escolha final é da pessoa, na tela do Windows
+                Notify("Na tela do Windows, escolha o MK Vision como padrão");
+            }
+            catch (Exception error) { Notify($"Não consegui registrar: {error.Message}"); }
+        });
+        if (!registered) return choose;
+        return new MenuEntry("Player padrão do Windows", Sub:
+        [
+            choose,
+            new("Remover o MK Vision dos players de vídeo", () =>
+            {
+                try
+                {
+                    FileAssociation.Unregister();
+                    Notify("MK Vision removido dos players de vídeo");
+                }
+                catch (Exception error) { Notify($"Não consegui remover: {error.Message}"); }
+            })
+        ]);
     }
 
     // WM_RBUTTONUP fora do navegador: o menu, se foi na imagem (ou na tela vazia).

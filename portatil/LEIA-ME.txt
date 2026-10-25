@@ -15,7 +15,7 @@ IAs da NVIDIA
   funcionam normalmente; só essas IAs ficam desligadas.
 
 Atualizações
-  O app avisa quando sai uma versão nova: botão direito na imagem (ou menu Arquivo) → "Atualizar para a
+  O app avisa quando sai uma versão nova: botão direito na imagem → "Atualizar para a
   versão ...". Ele baixa, fecha e abre de novo já atualizado. Versões e novidades:
   https://github.com/marukezu/MK-Vision/releases
 

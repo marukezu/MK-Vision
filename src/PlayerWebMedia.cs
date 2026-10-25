@@ -86,10 +86,11 @@ internal sealed partial class Player
     // Page Up/Down passa pelas fotos e vídeos dele, na ordem do post, a partir do que estava na tela.
     public void OpenWeb(WebMedia media, string userAgent, string? cookies)
     {
+        if (!PrepareTab(WebIdentity(media), "web:")) return; // já aberto numa aba: vai para ela (PlayerTabs)
         StartSlowAi();
         lock (_lock)
         {
-            _webMedia.Clear(); // os do post anterior
+            // (os vídeos dos posts anteriores ficam: outras abas podem abrir de novo)
             string Key(WebMedia video)
             {
                 string key = $"web:{++_webMediaCount}";
@@ -112,6 +113,10 @@ internal sealed partial class Player
                 _pendingOpen = Key(media);
                 (_folderFiles, _folderIndex) = ([], -1);
             }
+            if (_activeTab is { } tab)
+            {
+                (tab.Path, tab.Identity, tab.Title, tab.Video) = (_pendingOpen, WebIdentity(media), media.Title, true);
+            }
             _listScroll = -1;
         }
         _decodeWake.Set();
@@ -123,6 +128,9 @@ internal sealed partial class Player
     // Qualquer thread: abre a imagem "index" de uma galeria de endereços (Page Up/Down passa pelas outras).
     public void OpenWebGallery(string[] urls, int index, IReadOnlyDictionary<string, string> headers)
     {
+        if (urls.Length == 0) return;
+        string url = urls[Math.Clamp(index, 0, urls.Length - 1)];
+        if (!PrepareTab(IdentityOf(url), url)) return; // já aberta numa aba: vai para ela (PlayerTabs)
         lock (_lock)
         {
             _webImageHeaders = headers;

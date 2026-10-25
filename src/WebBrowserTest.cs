@@ -1918,7 +1918,7 @@ internal static class WebBrowserTest
         Pump(1);
 
         var menu = player.TestMenu();
-        Check("tela vazia: navegador e abrir", menu.SequenceEqual(["Voltar para o navegador", "Abrir..."]), Show(menu));
+        Check("tela vazia: navegador, abrir e o player padrão", menu.Take(2).SequenceEqual(["Voltar para o navegador", "Abrir..."]) && menu.Any(m => m.Contains("player") && m.Contains("padrão")), Show(menu));
 
         player.Open(png);
         Wait(() => player.TestTitle.Contains("foto"), 10);
@@ -1927,8 +1927,9 @@ internal static class WebBrowserTest
         int cx = shot.width / 2, cy = shot.height / 2;
         menu = player.TestMenu();
         Check("foto: navegador no topo, depois arquivo e edição",
-            menu.Take(9).SequenceEqual(["Voltar para o navegador", "Salvar imagem", "Mostrar no Explorer", "Anterior da pasta", "Próximo da pasta",
-                "Editar com o ComfyUI...", "Desenhar / marcar área", "Cortar", "Melhorar com a IA de fotos"]), Show(menu));
+            menu.Take(5).SequenceEqual(["Voltar para o navegador", "Salvar imagem", "Mostrar no Explorer", "Anterior da pasta", "Próximo da pasta"]) &&
+            menu.Any(m => m.Contains("player") && m.Contains("padrão")) &&
+            new[] { "Editar com o ComfyUI...", "Desenhar / marcar área", "Cortar", "Melhorar com a IA de fotos" }.All(menu.Contains), Show(menu));
         Check("foto: efeitos e imagem (girar, espelhar); sem o que é de vídeo",
             menu.Contains("Luz e cor") && menu.Contains("Comparar sem ajustes") && menu.Contains("Nitidez do player ✓") && menu.Any(m => m.StartsWith("Potência da IA (")) &&
             menu.Contains("Girar 90° para a direita") && menu.Contains("Espelhar na horizontal") && menu.Contains("Espelhar na vertical") &&
@@ -2694,6 +2695,234 @@ internal static class WebBrowserTest
             bool low = processes.Count > 0 && processes.All(p => Priorities.Read(p) is { cpu: System.Diagnostics.ProcessPriorityClass.BelowNormal, io: Priorities.IoLow, gpu: Priorities.GpuBelowNormal });
             Check("ComfyUI abaixo do normal (processador, disco e placa)", task.IsCompletedSuccessfully && low, task.IsFaulted ? task.Exception!.GetBaseException().Message : string.Join("; ", texts));
         }
+        player.Dispose();
+        Console.WriteLine(failures == 0 ? "tudo certo" : $"{failures} falha(s)");
+        return failures == 0 ? 0 : 1;
+    }
+
+    // --playertabstest <pasta>: as abas do player — cada imagem/vídeo na sua aba, com a sua sessão (giro, espelho, a versão
+    // do ComfyUI, a posição do vídeo); abrir o que já está aberto vai para a aba dele; Page Down troca dentro da aba; a
+    // faixa aparece com o mouse no topo; o X e o botão do meio fecham; sem abas, a tela vazia. E o texto do andamento.
+    public static int PlayerTabs(string folder)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Directory.CreateDirectory(folder);
+        string photos = Path.Combine(folder, "fotos");
+        Directory.CreateDirectory(photos);
+        string a = Path.Combine(photos, "a.png"), b = Path.Combine(photos, "b.png"), clip = Path.Combine(folder, "clip.mp4");
+        foreach (var (file, r, g) in new[] { (a, 200, 40), (b, 40, 200) })
+        {
+            var pixels = new byte[800 * 600 * 4];
+            for (int i = 0; i < pixels.Length; i += 4) (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) = (40, (byte)g, (byte)r, 255);
+            InterpTest.Png(file, pixels, 800, 0, 0, 800, 600);
+        }
+        MediaFactory.MFStartup(true).CheckError();
+        PlayerTest.WriteClip(clip);
+        using var gpu = new Gpu();
+        int failures = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "OK    " : "FALHOU")} {what}: {detail}");
+            if (!ok) failures++;
+        }
+        void Pump(double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                while (Native.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1)) { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
+                Thread.Sleep(5);
+            }
+        }
+        bool Wait(Func<bool> condition, double seconds)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition() && clock.Elapsed.TotalSeconds < seconds) Pump(0.1);
+            return condition();
+        }
+        var player = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        IntPtr Pos(int x, int y) => (IntPtr)((y << 16) | (x & 0xffff));
+        string Tabs() => string.Join(" | ", player.TestMediaTabs);
+        void Click(int x, int y, uint down = PlayerNative.WM_LBUTTONDOWN, uint up = PlayerNative.WM_LBUTTONUP)
+        {
+            PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(x, y));
+            Pump(0.2);
+            PlayerNative.PostMessage(player.Hwnd, down, IntPtr.Zero, Pos(x, y));
+            if (up != 0) PlayerNative.PostMessage(player.Hwnd, up, IntPtr.Zero, Pos(x, y));
+            Pump(0.6);
+        }
+
+        // O texto do andamento.
+        string t1 = Player.TestStepText(1, 1, 1, 25, 12.4, double.NaN, double.NaN), t2 = Player.TestStepText(1, 1, 3, 25, 42, 8.3, 207);
+        string t3 = Player.TestStepText(2, 3, 3, 8, 70, 6.1, 160.2);
+        Check("andamento: passo 1 (ainda sem média)", t1 == "Passo 01/25 · 00:12 decorridos · calculando o restante", t1);
+        Check("andamento: decorridos, restantes e s por passo", t2 == "Passo 03/25 · 00:42 decorridos · 03:27 restantes (8,3 s por passo)", t2);
+        Check("andamento: Wan com etapas", t3 == "Etapa 2/3 · Passo 03/08 · 01:10 decorridos · 02:40 restantes (6,1 s por passo)", t3);
+
+        Check("sem nada aberto: sem abas", player.TestMediaTabs.Length == 0, Tabs());
+        player.OpenTab(a);
+        Wait(() => player.TestTitle.Contains("a.png"), 10);
+        Pump(0.5);
+        Check("abrir: a 1ª aba", player.TestMediaTabs.SequenceEqual(["*a.png"]), Tabs());
+        // A sessão da aba a: giro, espelho e uma resposta do ComfyUI.
+        player.TestRotate(90);
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x24, IntPtr.Zero); // Home: espelho
+        Pump(0.4);
+        var green = new byte[400 * 300 * 4];
+        for (int i = 0; i < green.Length; i += 4) (green[i], green[i + 1], green[i + 2], green[i + 3]) = (0, 255, 0, 255);
+        player.TestComfyResult(green, 400, 300);
+        Pump(0.4);
+        Check("aba a: girada, espelhada, com a versão do ComfyUI", player.TestTitle.Contains("girado 90°") && player.TestFlip.h && player.TestShownName == "ComfyUI",
+            $"{player.TestTitle} · espelho {player.TestFlip.h} · {player.TestShownName}");
+        player.OpenTab(b);
+        Wait(() => player.TestTitle.Contains("b.png"), 10);
+        Pump(0.5);
+        Check("outra imagem: aba nova, do zero", player.TestMediaTabs.SequenceEqual(["a.png", "*b.png"]) && !player.TestTitle.Contains("girado") && !player.TestFlip.h && player.TestShownName == "original",
+            $"{Tabs()} · {player.TestTitle} · espelho {player.TestFlip.h} · {player.TestShownName}");
+        player.TestSwitchTab(0);
+        Pump(0.6);
+        Check("de volta à aba a: tudo como estava", player.TestTitle.Contains("a.png") && player.TestTitle.Contains("girado 90°") && player.TestFlip.h && player.TestShownName == "ComfyUI",
+            $"{player.TestTitle} · espelho {player.TestFlip.h} · {player.TestShownName}");
+        player.OpenTab(b);
+        Pump(0.6);
+        Check("abrir o que já está aberto: vai para a aba dele", player.TestMediaTabs.SequenceEqual(["a.png", "*b.png"]), Tabs());
+        player.TestSwitchTab(0);
+        Pump(0.5);
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x22, IntPtr.Zero); // Page Down
+        Wait(() => player.TestTitle.Contains("b.png"), 10);
+        Pump(0.4);
+        Check("Page Down: troca dentro da própria aba", player.TestMediaTabs.Length == 2 && player.TestMediaTabs[0] == "*b.png", Tabs());
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x21, IntPtr.Zero); // Page Up
+        Wait(() => player.TestTitle.Contains("a.png"), 10);
+
+        // Vídeo: a posição volta (pausado: parado no mesmo quadro; tocando: continua).
+        player.OpenTab(clip);
+        Wait(() => player.State.playing && player.State.fileTime > 1.2, 15);
+        player.TestPause();
+        Pump(0.4);
+        double paused = player.State.fileTime;
+        Check("a aba nova abre ao lado da atual", player.TestMediaTabs.SequenceEqual(["a.png", "*clip.mp4", "b.png"]), Tabs());
+        player.TestSwitchTab(0);
+        Pump(0.6);
+        player.TestSwitchTab(1);
+        Wait(() => Math.Abs(player.State.fileTime - paused) < 0.15, 10);
+        Pump(0.5);
+        Check("vídeo pausado: volta parado no mesmo ponto", !player.State.playing && Math.Abs(player.State.fileTime - paused) < 0.15,
+            $"{player.State.fileTime:0.00} s (era {paused:0.00}), tocando {player.State.playing}");
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x20, IntPtr.Zero); // espaço: toca
+        Wait(() => player.State.playing, 3);
+        Pump(0.5);
+        double before = player.State.fileTime;
+        player.TestSwitchTab(2);
+        Pump(0.8);
+        player.TestSwitchTab(1);
+        Wait(() => player.State.playing && player.State.fileTime > 0.05, 10);
+        Pump(0.6);
+        Check("vídeo tocando: volta tocando de onde estava", player.State.playing && player.State.fileTime >= before - 0.2,
+            $"{player.State.fileTime:0.00} s (saiu em {before:0.00}), tocando {player.State.playing}");
+
+        // A faixa no topo.
+        var shot = player.Snapshot()!.Value;
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(shot.width / 2, player.UiScaled(12)));
+        Pump(0.6);
+        Check("mouse no topo: a faixa das abas", player.BarsVisible.top, $"{player.BarsVisible.top} ({player.TestMouse})");
+        if (player.Snapshot() is { } top) InterpTest.Png(Path.Combine(folder, "abas.png"), top.pixels, top.width, 0, 0, top.width, top.height);
+        var (cx, cy) = player.TestTabCenter(2);
+        Click(cx, cy);
+        Check("clique na aba: troca", player.TestActiveTab == 2 && player.TestTitle.Contains("b.png"), $"{Tabs()} · {player.TestTitle}");
+        var (xx, xy) = player.TestTabCenter(2, close: true);
+        Click(xx, xy);
+        Check("o X fecha (a do lado entra)", player.TestMediaTabs.Length == 2 && player.TestActiveTab >= 0, Tabs());
+        int was = player.TestActiveTab;
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_KEYDOWN, 0x09, IntPtr.Zero); // Tab
+        Pump(0.6);
+        Check("Tab: a próxima aba (→)", player.TestActiveTab == (was + 1) % player.TestMediaTabs.Length, $"{was} → {player.TestActiveTab} · {Tabs()}");
+        player.TestNextTab(-1); // (o Shift+Tab: o Shift de verdade não dá para simular aqui)
+        Pump(0.6);
+        Check("Shift+Tab: a anterior (←)", player.TestActiveTab == was, $"{player.TestActiveTab} · {Tabs()}");
+        var (mx, my) = player.TestTabCenter(0);
+        Click(mx, my, PlayerNative.WM_MBUTTONDOWN, 0);
+        Check("botão do meio fecha", player.TestMediaTabs.Length == 1, Tabs());
+        player.TestCloseTab(0);
+        Pump(0.6);
+        Check("sem abas: a tela vazia", player.TestMediaTabs.Length == 0 && !player.TestTitle.Contains(".png") && !player.TestTitle.Contains(".mp4"), $"{Tabs()} · {player.TestTitle}");
+        player.Dispose();
+        Console.WriteLine(failures == 0 ? "tudo certo" : $"{failures} falha(s)");
+        return failures == 0 ? 0 : 1;
+    }
+
+    // --comfyqueuetest <pasta>: a fila do ComfyUI por aba, com o ComfyUI de verdade (poucos passos): duas abas pedem, a 2ª
+    // espera; a resposta da 1ª vai para a aba dela (fora da tela, "pronto"); a da 2ª aparece na tela; uma 3ª aba fechada
+    // na fila sai dela; e o andamento no formato novo.
+    public static int ComfyQueue(string folder)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Directory.CreateDirectory(folder);
+        string[] files = [Path.Combine(folder, "um.png"), Path.Combine(folder, "dois.png"), Path.Combine(folder, "tres.png")];
+        for (int f = 0; f < files.Length; f++)
+        {
+            var pixels = new byte[640 * 480 * 4];
+            for (int i = 0; i < pixels.Length; i += 4) (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) = ((byte)(60 * f), 120, (byte)(200 - 60 * f), 255);
+            InterpTest.Png(files[f], pixels, 640, 0, 0, 640, 480);
+        }
+        using var gpu = new Gpu();
+        int failures = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "OK    " : "FALHOU")} {what}: {detail}");
+            if (!ok) failures++;
+        }
+        var seen = new List<string>();
+        void Pump(double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                while (Native.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1)) { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
+                Thread.Sleep(5);
+            }
+        }
+        var player = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        bool Wait(Func<bool> condition, double seconds)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition() && clock.Elapsed.TotalSeconds < seconds)
+            {
+                Pump(0.25);
+                if (player.TestOsdText is { Length: > 0 } t && (seen.Count == 0 || seen[^1] != t)) seen.Add(t);
+            }
+            return condition();
+        }
+        string Tabs() => string.Join(" | ", player.TestMediaTabs);
+        player.OpenTab(files[0]);
+        Wait(() => player.TestTitle.Contains("um.png"), 10);
+        Pump(0.5);
+        Check("aba 1: pedido aceito", player.TestEnqueueComfy("make the colors warmer", 4), Tabs());
+        player.OpenTab(files[1]);
+        Wait(() => player.TestTitle.Contains("dois.png"), 10);
+        Pump(0.5);
+        player.TestEnqueueComfy("make the colors cooler", 4);
+        Pump(1);
+        Check("aba 2: na fila atrás da 1", player.TestComfyQueueCount == 2 && player.TestMediaTabs[1].Contains("fila 1º"), Tabs());
+        player.OpenTab(files[2]);
+        Wait(() => player.TestTitle.Contains("tres.png"), 10);
+        Pump(0.5);
+        player.TestEnqueueComfy("add a sun", 4);
+        Pump(0.5);
+        Check("aba 3: na fila (2º)", player.TestComfyQueueCount == 3 && player.TestMediaTabs[2].Contains("fila 2º"), Tabs());
+        player.TestCloseTab(2);
+        Pump(0.5);
+        Check("fechar a aba 3: sai da fila", player.TestComfyQueueCount == 2 && player.TestMediaTabs.Length == 2, $"fila {player.TestComfyQueueCount} · {Tabs()}");
+        player.TestSwitchTab(1); // na tela: a aba 2 (a 1 gera fora da tela)
+        Check("a 1ª termina (fora da tela): \"pronto\" na aba dela", Wait(() => player.TestMediaTabs[0].Contains("pronto"), 900), Tabs());
+        Check("a 2ª termina (na tela): a resposta aparece nela", Wait(() => player.TestComfyQueueCount == 0 && player.TestShownName == "ComfyUI", 900),
+            $"fila {player.TestComfyQueueCount} · {player.TestShownName} · {Tabs()}");
+        player.TestSwitchTab(0);
+        Pump(1);
+        Check("de volta à aba 1: a resposta dela está lá", player.TestShownName == "ComfyUI" && !player.TestMediaTabs[0].Contains("pronto"), $"{player.TestShownName} · {Tabs()}");
+        var steps = seen.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^Passo \d\d/\d\d · \d\d:\d\d decorridos · (\d\d:\d\d restantes \(\d+,\d s por passo\)|calculando o restante)$")).ToList();
+        Check("andamento no formato novo", steps.Count >= 2, string.Join(" ‖ ", steps.Take(4)));
+        Check("antes dos passos: o aviso de sempre", seen.Any(t => t.Contains("preparando o modelo")), string.Join(" ‖ ", seen.Take(6)));
         player.Dispose();
         Console.WriteLine(failures == 0 ? "tudo certo" : $"{failures} falha(s)");
         return failures == 0 ? 0 : 1;

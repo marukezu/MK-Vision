@@ -3,7 +3,7 @@ using static MKVision.Desktop.PlayerNative;
 
 namespace MKVision.Desktop;
 
-// Painel de ajustes do player (tecla A ou Tab), em 3 abas: Imagem (perfil, nitidez, limpeza, força), Câmera lenta
+// Painel de ajustes do player (tecla A), em 3 abas: Imagem (perfil, nitidez, limpeza, força), Câmera lenta
 // (liga/desliga, desempenho e as opções da IA de quadros, com a situação ao vivo) e Zoom (potência da IA).
 // Janelinha escura presa à janela do player: fica por cima dela, também em tela cheia, sem roubar o teclado ao abrir.
 // Os controles são posicionados por linhas (Layout): cada aba mostra só as suas e a janela acompanha a altura.
@@ -526,7 +526,7 @@ internal sealed class PlayerPanel : IDisposable
                 SetBkColor(wParam, Background);
                 return BackgroundBrush;
             case WM_CLOSE:
-                Native.ShowWindow(Hwnd, Native.SW_HIDE); // fechar = esconder (A ou Tab abre de novo)
+                Native.ShowWindow(Hwnd, Native.SW_HIDE); // fechar = esconder (A abre de novo)
                 return 0;
         }
         return DefWindowProcW(hwnd, msg, wParam, lParam);

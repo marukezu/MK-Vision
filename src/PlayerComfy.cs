@@ -32,20 +32,17 @@ internal sealed partial class Player
 
     private void ComfyKey(bool cancel)
     {
+        ComfyJob? mine;
+        lock (_lock) mine = _activeTab is { } here ? ComfyJobOf(here) : null;
         if (cancel)
         {
-            if (_comfyJob is { IsCancellationRequested: false } running)
-            {
-                running.Cancel();
-                _ = ComfyClient.Interrupt();
-                Notify("ComfyUI: cancelado");
-            }
-            else Notify("Nada sendo gerado no ComfyUI");
+            if (mine is not null) CancelComfyJob(mine);
+            else Notify("Esta aba não tem nada no ComfyUI");
             return;
         }
-        if (_comfyJob is { IsCancellationRequested: false })
+        if (mine is not null)
         {
-            Notify("O ComfyUI ainda está gerando · Shift+G cancela");
+            Notify(mine.Running ? "Esta aba já está gerando no ComfyUI · Shift+G cancela" : $"Esta aba já está na fila do ComfyUI ({QueuePosition(mine)}º) · Shift+G cancela");
             return;
         }
         bool video, photo, playing;
@@ -140,80 +137,295 @@ internal sealed partial class Player
         if (area is { } marked && AreaInstruction(marked.areaColors, marked.markColors) is { Length: > 0 } instruction)
             prompt = prompt.TrimEnd() + (prompt.TrimEnd().EndsWith('.') ? " " : ". ") + instruction;
 
-        var job = _comfyJob = new CancellationTokenSource();
-        var token = job.Token;
-        if (video) Interlocked.Increment(ref _stillJobs); // o clique no vídeo não dá play enquanto gera
-        Task.Run(async () =>
+        PlayerTab? tab;
+        string tabPath;
+        lock (_lock)
         {
-            var clock = Stopwatch.StartNew();
-            string lastStatus = "";
-            void Progress(string text)
+            tab = _activeTab;
+            tabPath = tab?.Path ?? "";
+        }
+        if (tab is null) return;
+        EnqueueComfy(new ComfyJob
+        {
+            Tab = tab, Path = tabPath, Time = time, Video = video, Serial = serial, Workflow = workflow, Pixels = pixels, W = w, H = h,
+            Clean = clean, CleanW = cleanW, CleanH = cleanH, Area = area, Prompt = prompt, Negative = texts.negative, Loras = texts.loras,
+            Sampler = texts.sampler, Second = texts.second
+        });
+    }
+
+    // Autoteste: um pedido da aba da tela, como o G (sem a janela): o 1º workflow, com "steps" passos.
+    public bool TestEnqueueComfy(string prompt, int steps)
+    {
+        var shot = TestComfyPixels();
+        PlayerTab? tab;
+        string path;
+        long serial;
+        lock (_lock)
+        {
+            (tab, path) = (_activeTab, _activeTab?.Path ?? "");
+            serial = ScreenFrame()?.Serial ?? -1;
+        }
+        if (shot is not { } s || tab is null) return false;
+        var workflow = ComfyClient.Workflows[0].Name;
+        var sampler = ComfyClient.SavedSampler(workflow) is { } saved ? saved with { Steps = steps } : null;
+        EnqueueComfy(new ComfyJob { Tab = tab, Path = path, Serial = serial, Workflow = workflow, Pixels = s.pixels, W = s.w, H = s.h, Prompt = prompt, Negative = "", Sampler = sampler });
+        return true;
+    }
+    public int TestComfyQueueCount { get { lock (_lock) return _comfyQueue.Count; } }
+
+    // ---------- Fila do ComfyUI ----------
+    // Cada aba manda o seu pedido (G); um roda por vez, na ordem, e o próximo começa sozinho. A resposta volta para a aba
+    // que pediu (na tela: aparece na hora; fora: espera a aba voltar). Fechar a aba cancela o pedido dela.
+
+    private sealed class ComfyJob
+    {
+        public required PlayerTab Tab;
+        public required string Path; // o que a aba mostrava (a resposta só vale para ele)
+        public double Time;          // o momento do vídeo
+        public bool Video;
+        public long Serial;
+        public required string Workflow;
+        public byte[]? Pixels, Clean;
+        public int W, H, CleanW, CleanH;
+        public (float[]? mask, string[] areaColors, string[] markColors)? Area;
+        public required string Prompt, Negative;
+        public List<ComfyClient.LoraSetting>? Loras;
+        public ComfyClient.SamplerSetting? Sampler;
+        public string? Second;
+        public readonly CancellationTokenSource Cts = new();
+        public bool Running;
+        public double Fraction;
+        public string Status = "";             // o último aviso (enviando, na fila, preparando o modelo)
+        public ComfyClient.StepInfo? Step;     // o último passo (e quando chegou: o relógio continua entre eles)
+        public double StepAt;
+    }
+
+    private readonly List<ComfyJob> _comfyQueue = []; // com _lock; o primeiro é o que roda
+    private bool _comfyWorker;
+
+    private ComfyJob? ComfyJobOf(PlayerTab tab)
+    {
+        lock (_lock) return _comfyQueue.FirstOrDefault(j => j.Tab == tab);
+    }
+
+    // Posição na espera (1 = o próximo).
+    private int QueuePosition(ComfyJob job)
+    {
+        lock (_lock) return Math.Max(1, _comfyQueue.Where(j => !j.Running).ToList().IndexOf(job) + 1);
+    }
+
+    private void EnqueueComfy(ComfyJob job)
+    {
+        bool start;
+        int waiting;
+        lock (_lock)
+        {
+            _comfyQueue.Add(job);
+            waiting = _comfyQueue.Count - 1;
+            start = !_comfyWorker;
+            _comfyWorker = true;
+            _dirty = true;
+        }
+        Log.Write($"Comfy: pedido da aba \"{job.Tab.Title}\" na fila ({waiting} na frente).");
+        Notify(waiting == 0 ? "Enviando ao ComfyUI..." : $"Na fila do ComfyUI ({waiting}º): começa quando o pedido de antes terminar");
+        if (start) _ = Task.Run(ComfyWorker);
+    }
+
+    // Um pedido por vez, até a fila esvaziar.
+    private async Task ComfyWorker()
+    {
+        while (true)
+        {
+            ComfyJob? job;
+            lock (_lock)
             {
-                if (token.IsCancellationRequested) return;
-                lastStatus = text;
-                Notify(text);
-            }
-            // O aviso some em 1,5 s: repete o último enquanto espera.
-            using var repeat = new Timer(_ => { if (lastStatus.Length > 0 && !token.IsCancellationRequested) Notify(lastStatus); }, null, 1200, 1200);
-            try
-            {
-                // A placa (8 GB) toda para o ComfyUI: as IAs do MK Vision saem da memória dela e voltam sozinhas quando
-                // usadas de novo (I: alguns segundos; câmera lenta: ao tocar o vídeo com ela ligada).
-                Progress("Liberando a memória da placa para o ComfyUI...");
-                if (PhotoAi.Release() | RifeHost.Release() | ToneAi.Release()) GC.Collect();
-                Log.Write(pixels is null ? "Comfy: gerando do zero (sem imagem de entrada)." : $"Comfy: enviando {(video ? $"o quadro de {TimeText(time)}" : "a foto")} ({w}x{h})" +
-                    (area is { } a ? $", com {(a.mask is not null ? "área marcada" : "marcas")} (anotações)" : "") +
-                    (texts.second is { } secondFile ? $" e a imagem 2 ({Path.GetFileName(secondFile)})." : "."));
-                var generated = await ComfyClient.Run(workflow, pixels, w, h, prompt, texts.negative, texts.loras, texts.sampler, Progress, token, texts.second);
-                var result = generated.Image;
-                RememberSeed(workflow, generated.Seed);
-                token.ThrowIfCancellationRequested();
-                if (generated.IsVideo)
+                job = _comfyQueue.FirstOrDefault();
+                if (job is null)
                 {
-                    // Vídeo (Wan): arquivo temporário (sai na limpeza, ao fechar) aberto no player; Shift+S salva onde quiser.
-                    lastStatus = "";
-                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MKVisionDesktop", "comfy-videos");
-                    Directory.CreateDirectory(folder);
-                    string file = Path.Combine(folder, $"wan_{DateTime.Now:yyyyMMdd_HHmmss}_seed{generated.Seed}{generated.Extension}");
-                    File.WriteAllBytes(file, result);
-                    ComfyClient.RememberFile(file);
-                    double seconds = clock.Elapsed.TotalSeconds;
-                    Log.Write($"Comfy: vídeo pronto em {seconds:0.0} s ({result.Length / 1048576.0:0.0} MB).");
-                    _uiQueue.Enqueue((_ =>
-                    {
-                        // O vídeo já vem girado e espelhado como a tela estava: sem girar de novo.
-                        lock (_lock) (_rotation, _flipH, _flipV) = (0, false, false);
-                        Open(file);
-                        Notify($"Vídeo do ComfyUI pronto em {seconds / 60:0.0} min (seed {generated.Seed}) · Shift+S salva o vídeo · Ctrl+S o quadro");
-                    }, null));
-                    PlayerNative.PostMessage(Hwnd, WM_RUN, IntPtr.Zero, IntPtr.Zero);
+                    _comfyWorker = false;
                     return;
                 }
-                var (output, ow, oh) = ImageFile.DecodePixels(result);
-                for (int i = 3; i < output.Length; i += 4) output[i] = 255;
-                // Área marcada: a edição só vale dentro dela; fora (e no contorno) volta a imagem original, sem o desenho.
-                if (area?.mask is { } editMask && clean is not null) output = ComfyArea.KeepOutside(output, ow, oh, clean, cleanW, cleanH, editMask);
-                lastStatus = "";
-                bool shown = ShowComfy(output, ow, oh, serial);
-                Log.Write($"Comfy: pronto em {clock.Elapsed.TotalSeconds:0.0} s ({ow}x{oh}){(shown ? "" : ", mas a tela já mudou")}.");
-                Notify(shown ? $"ComfyUI: pronto em {clock.Elapsed.TotalSeconds:0} s (seed {generated.Seed}) · T alterna com a original · I melhora · Ctrl+S salva" :
-                    "ComfyUI terminou, mas o quadro da tela mudou (o resultado foi descartado)");
+                job.Running = true;
+                _dirty = true;
             }
-            catch (OperationCanceledException) { Log.Write("Comfy: cancelado."); }
-            catch (Exception error)
-            {
-                lastStatus = "";
-                Log.Write($"Comfy: falhou — {error.Message}");
-                Notify("ComfyUI: " + error.Message.Split('\n')[0]);
-            }
+            _comfyJob = job.Cts;
+            try { await RunComfyJob(job); }
+            catch (Exception error) { Log.Write($"Comfy: o pedido falhou — {error.Message}"); }
             finally
             {
-                if (video) Interlocked.Decrement(ref _stillJobs);
-                if (_comfyJob == job) _comfyJob = null;
-                job.Dispose();
+                lock (_lock)
+                {
+                    _comfyQueue.Remove(job);
+                    _dirty = true;
+                }
+                if (_comfyJob == job.Cts) _comfyJob = null;
                 _renderWake.Set();
             }
-        }, token);
+        }
+    }
+
+    // Cancela o pedido: na fila, sai; gerando, o ComfyUI para.
+    private void CancelComfyJob(ComfyJob job, bool quiet = false)
+    {
+        bool running;
+        lock (_lock)
+        {
+            running = job.Running;
+            if (!running) _comfyQueue.Remove(job);
+            _dirty = true;
+        }
+        job.Cts.Cancel();
+        if (running) _ = ComfyClient.Interrupt();
+        Log.Write($"Comfy: pedido da aba \"{job.Tab.Title}\" cancelado{(running ? " (estava gerando)" : " (estava na fila)")}.");
+        if (!quiet) Notify("ComfyUI: cancelado");
+        _renderWake.Set();
+    }
+
+    // Fechar a aba: tudo dela no ComfyUI sai.
+    private void CancelComfyFor(PlayerTab tab)
+    {
+        if (ComfyJobOf(tab) is { } job) CancelComfyJob(job, quiet: true);
+        tab.Comfy = null;
+    }
+
+    // "Passo 01/25 · 00:12 decorridos · 03:27 restantes (8,3 s por passo)" — com o relógio andando entre os passos.
+    private static string StepText(ComfyClient.StepInfo step, double since)
+    {
+        var pt = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+        static string Clock(double seconds)
+        {
+            var t = TimeSpan.FromSeconds(Math.Max(0, Math.Round(seconds)));
+            return t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes:00}:{t.Seconds:00}";
+        }
+        string stage = step.Stages > 1 ? $"Etapa {step.Stage}/{step.Stages} · " : "";
+        string text = $"{stage}Passo {step.Step:00}/{step.Steps:00} · {Clock(step.Elapsed + since)} decorridos";
+        if (double.IsNaN(step.Remaining)) return text + " · calculando o restante";
+        return text + $" · {Clock(step.Remaining - since)} restantes ({step.SecondsPerStep.ToString("0.0", pt)} s por passo)";
+    }
+
+    private string JobText(ComfyJob job) => job.Step is { } step ? StepText(step, Now - job.StepAt) : job.Status;
+
+    private async Task RunComfyJob(ComfyJob job)
+    {
+        var token = job.Cts.Token;
+        var clock = Stopwatch.StartNew();
+        // Os avisos do pedido aparecem com a aba dele na tela (ou no navegador); a aba mostra a porcentagem no selo.
+        bool Visible()
+        {
+            lock (_lock) return _webMode || _activeTab == job.Tab;
+        }
+        void Progress(string text)
+        {
+            if (token.IsCancellationRequested) return;
+            (job.Status, job.Step) = (text, null);
+            if (Visible()) Notify(text);
+        }
+        void Step(ComfyClient.StepInfo step)
+        {
+            if (token.IsCancellationRequested) return;
+            (job.Step, job.StepAt) = (step, Now);
+            int before = (int)(job.Fraction * 100);
+            job.Fraction = step.Fraction;
+            if (Visible()) Notify(JobText(job));
+            else if ((int)(job.Fraction * 100) != before)
+            {
+                lock (_lock) _dirty = true; // o selo da aba
+                _renderWake.Set();
+            }
+        }
+        // O aviso some em 1,5 s: repete a cada segundo (com o relógio andando).
+        using var repeat = new Timer(_ =>
+        {
+            if (token.IsCancellationRequested) return;
+            string text = JobText(job);
+            if (text.Length > 0 && Visible()) Notify(text);
+        }, null, 1000, 1000);
+        try
+        {
+            // A placa toda para o ComfyUI: as IAs do MK Vision saem da memória dela e voltam sozinhas quando usadas de
+            // novo (I: alguns segundos; câmera lenta: ao tocar o vídeo com ela ligada).
+            Progress("Liberando a memória da placa para o ComfyUI...");
+            if (PhotoAi.Release() | RifeHost.Release() | ToneAi.Release()) GC.Collect();
+            Log.Write(job.Pixels is null ? $"Comfy: gerando do zero (aba \"{job.Tab.Title}\")." :
+                $"Comfy: enviando {(job.Video ? $"o quadro de {TimeText(job.Time)}" : "a foto")} da aba \"{job.Tab.Title}\" ({job.W}x{job.H})" +
+                (job.Area is { } a ? $", com {(a.mask is not null ? "área marcada" : "marcas")} (anotações)" : "") +
+                (job.Second is { } secondFile ? $" e a imagem 2 ({System.IO.Path.GetFileName(secondFile)})." : "."));
+            var generated = await ComfyClient.Run(job.Workflow, job.Pixels, job.W, job.H, job.Prompt, job.Negative, job.Loras, job.Sampler,
+                Progress, token, job.Second, Step);
+            var result = generated.Image;
+            RememberSeed(job.Workflow, generated.Seed);
+            token.ThrowIfCancellationRequested();
+            double seconds = clock.Elapsed.TotalSeconds;
+            string took = TimeSpan.FromSeconds(seconds).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"mm\:ss");
+            (job.Status, job.Step) = ("", null);
+            if (generated.IsVideo)
+            {
+                // Vídeo (Wan): arquivo temporário (sai na limpeza, ao fechar), aberto numa aba nova ao lado da que pediu
+                // (a imagem de origem continua na dela). Shift+S salva onde quiser.
+                string folder = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MKVisionDesktop", "comfy-videos");
+                Directory.CreateDirectory(folder);
+                string file = System.IO.Path.Combine(folder, $"wan_{DateTime.Now:yyyyMMdd_HHmmss}_seed{generated.Seed}{generated.Extension}");
+                File.WriteAllBytes(file, result);
+                ComfyClient.RememberFile(file);
+                Log.Write($"Comfy: vídeo pronto em {seconds:0.0} s ({result.Length / 1048576.0:0.0} MB).");
+                PostUi(() =>
+                {
+                    bool exists;
+                    lock (_lock) exists = _mediaTabs.Contains(job.Tab);
+                    OpenTab(file, null, exists ? job.Tab : null); // aba nova: sem giro nem espelho (o vídeo já vem como a tela estava)
+                    Notify($"Vídeo do ComfyUI pronto em {took} (seed {generated.Seed}) · Shift+S salva o vídeo · Ctrl+S o quadro");
+                });
+                return;
+            }
+            var (output, ow, oh) = ImageFile.DecodePixels(result);
+            for (int i = 3; i < output.Length; i += 4) output[i] = 255;
+            // Área marcada: a edição só vale dentro dela; fora (e no contorno) volta a imagem original, sem o desenho.
+            if (job.Area?.mask is { } editMask && job.Clean is not null) output = ComfyArea.KeepOutside(output, ow, oh, job.Clean, job.CleanW, job.CleanH, editMask);
+            string where = DeliverComfy(job, output, ow, oh);
+            Log.Write($"Comfy: pronto em {seconds:0.0} s ({ow}x{oh}) — {where}.");
+            Notify(where switch
+            {
+                "na tela" => $"ComfyUI: pronto em {took} (seed {generated.Seed}) · T alterna com a original · I melhora · Ctrl+S salva",
+                "na aba" => $"ComfyUI terminou na aba \"{job.Tab.Title}\" (pronto em {took})",
+                _ => "ComfyUI terminou, mas a aba já mostra outra coisa (o resultado foi descartado)"
+            });
+        }
+        catch (OperationCanceledException) { Log.Write("Comfy: cancelado."); }
+        catch (Exception error)
+        {
+            Log.Write($"Comfy: falhou — {error.Message}");
+            Notify("ComfyUI: " + error.Message.Split('\n')[0]);
+        }
+    }
+
+    // A resposta vai para a aba que pediu: na tela (o mesmo quadro), aparece na hora; fora da tela (ou o quadro ainda
+    // voltando), espera ela. A aba fechada ou mostrando outro arquivo: descartada. Devolve onde ficou.
+    private string DeliverComfy(ComfyJob job, byte[] pixels, int w, int h)
+    {
+        lock (_gpuLock)
+        lock (_lock)
+        {
+            if (!_mediaTabs.Contains(job.Tab) || job.Tab.Path != job.Path) return "descartado";
+            var pending = new ComfyPending(pixels, w, h, job.Path, job.Time, job.Video);
+            if (job.Tab != _activeTab)
+            {
+                (job.Tab.Comfy, job.Tab.ComfyDone) = (pending, true);
+                _dirty = true;
+                return "na aba";
+            }
+            double tolerance = Math.Max(_frameDuration * 0.6, 0.02);
+            if (ScreenFrame() is { } frame && (frame.Serial == job.Serial || (job.Video ? Math.Abs(frame.FileTime - job.Time) <= tolerance : frame.Image)))
+            {
+                ApplyComfy(frame, pixels, w, h);
+                return "na tela";
+            }
+            if (job.Video && !_playing)
+            {
+                _comfyRestore = pending; // o quadro ainda voltando (a aba acabou de voltar): aparece quando ele chegar
+                return "na tela";
+            }
+            return "descartado";
+        }
     }
 
     // O resultado vira a versão "ComfyUI" da imagem (se a tela ainda for a mesma); a anterior do ComfyUI e a melhorada

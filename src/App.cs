@@ -151,7 +151,7 @@ internal sealed class App : IDisposable
             {
                 _player.BringToFront();
             }
-            if (path is not null) _player.Open(path);
+            if (path is not null) _player.OpenTab(path);
             else if (browser) _player.ShowBrowser();
         }
         catch (Exception error)

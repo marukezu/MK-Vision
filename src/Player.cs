@@ -320,6 +320,7 @@ internal sealed partial class Player : IDisposable
         lock (_lock)
         {
             if (!IsWeb(path) && !IsWebKey(path)) _fromWeb = false;
+            TrackOpen(path); // PlayerTabs: na aba da tela (sem aba: cria uma)
             _pendingOpen = path;
             (_folderFiles, _folderIndex) = (files, index);
             _listScroll = -1; // a lista se posiciona no vídeo atual na próxima vez que abrir
@@ -372,7 +373,7 @@ internal sealed partial class Player : IDisposable
         var thread = new Thread(() =>
         {
             string? path = AskForFile();
-            if (path is not null) Open(path);
+            if (path is not null) PostUi(() => OpenTab(path)); // em aba nova (ou na aba onde já está)
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -677,7 +678,7 @@ internal sealed partial class Player : IDisposable
         if (IsWeb(path))
         {
             // Imagem do navegador: baixa e abre como foto.
-            try { OpenImage(DownloadImage(path), WebName(path)); }
+            try { OpenImage(DownloadImage(path), WebName(path), key: path); }
             catch (Exception e)
             {
                 Log.Write($"Player: não consegui baixar a imagem — {e.Message}");
@@ -717,6 +718,12 @@ internal sealed partial class Player : IDisposable
         lock (_gpuLock)
         lock (_lock)
         {
+            if (_activeTab is { } current && current.Path != path)
+            {
+                // Trocou de aba enquanto abria: este arquivo não é mais o da tela (PlayerTabs).
+                file?.Dispose();
+                return;
+            }
             old = _file;
             _file = file;
             _image = false;
@@ -741,6 +748,8 @@ internal sealed partial class Player : IDisposable
             _seekRequest = null;
             _seekGeneration++;
             _dirty = true;
+            TabOpened(path, name, video: true); // PlayerTabs: o nome da aba
+            ApplyRestore(path, video: true);    // a aba voltando: posição, zoom, giro, corte, anotações
         }
         old?.Dispose();
         _renderWake.Set();
@@ -775,7 +784,8 @@ internal sealed partial class Player : IDisposable
 
     // Foto: um quadro só, parado. A limpeza, a IA de ampliação e a nitidez rodam como no vídeo — e de novo a
     // cada zoom, na parte que aparece na tela (zoom sem perder qualidade).
-    private void OpenImage(string path, string? displayName = null)
+    // "key": o que a aba abriu (o endereço, numa imagem do site; senão, o próprio arquivo).
+    private void OpenImage(string path, string? displayName = null, string? key = null)
     {
         Frame? frame = null;
         string error = "";
@@ -794,6 +804,12 @@ internal sealed partial class Player : IDisposable
         lock (_gpuLock)
         lock (_lock)
         {
+            if (_activeTab is { } current && current.Path != (key ?? path))
+            {
+                // Trocou de aba enquanto abria: esta foto não é mais a da tela (PlayerTabs).
+                if (frame is not null) DisposeFrame(frame);
+                return;
+            }
             old = _file;
             _file = null;
             _image = frame is not null;
@@ -819,6 +835,8 @@ internal sealed partial class Player : IDisposable
             _seekRequest = null;
             _seekGeneration++;
             _dirty = true;
+            TabOpened(key ?? path, _fileName, video: false);
+            ApplyRestore(key ?? path, video: false);
         }
         old?.Dispose();
         _renderWake.Set();
@@ -948,10 +966,11 @@ internal sealed partial class Player : IDisposable
                     freed = true;
                 }
                 frame = _queue.Count > 0 ? _queue[0] : null;
+                if (frame is not null && (_layersRestore is not null || _comfyRestore is not null)) AttachPending(frame); // PlayerTabs
                 (_drawnFrame, _drawnSerial) = (frame, frame?.Serial ?? -1); // o quadro do vídeo desta vez (SkipThisRefresh)
                 // Versões da imagem (IA de fotos / ComfyUI, PlayerPhotoAi): a escolhida no lugar do quadro (ou da foto), até
                 // dar play, pular ou abrir outra.
-                if (HasLayers && (_playing || frame?.Serial != _stillSerial || (_file is null && !_image))) DisposeStill();
+                if (_layersRestore is null && HasLayers && (_playing || frame?.Serial != _stillSerial || (_file is null && !_image))) DisposeStill();
                 if (frame is not null && _still is not null && _stillShowAi)
                 {
                     _shownFileTime = frame.FileTime;
@@ -1489,7 +1508,7 @@ internal sealed partial class Player : IDisposable
                 return 0;
             case WM_MBUTTONDOWN:
                 if (WebMode) WebMiddleClick(LowWord(lParam), HighWord(lParam));
-                else ResetZoom();
+                else if (!TabMiddleClick(LowWord(lParam), HighWord(lParam))) ResetZoom(); // numa aba: fecha
                 return 0;
             case 0x0205: // WM_RBUTTONUP: menus das abas e dos favoritos; no player, o menu da imagem
                 if (WebMode) WebRightClick(LowWord(lParam), HighWord(lParam));
@@ -1500,7 +1519,7 @@ internal sealed partial class Player : IDisposable
                 var buffer = new char[2048];
                 uint length = DragQueryFile(wParam, 0, buffer, (uint)buffer.Length);
                 DragFinish(wParam);
-                if (length > 0) Open(new string(buffer, 0, (int)length));
+                if (length > 0) OpenTab(new string(buffer, 0, (int)length));
                 return 0;
             }
             case WM_TIMER:
@@ -1514,7 +1533,7 @@ internal sealed partial class Player : IDisposable
             {
                 string? path = SingleInstance.Receive(lParam);
                 if (path is null) break;
-                if (path != "" && File.Exists(path)) Open(path);
+                if (path != "" && File.Exists(path)) OpenTab(path);
                 BringToFront();
                 return 1;
             }
@@ -1634,7 +1653,13 @@ internal sealed partial class Player : IDisposable
                 _settings.Strength = Math.Max(0, _settings.Strength - 0.25f);
                 Notify($"Força {_settings.Strength * 100:0}%");
                 break;
-            case 'A' or VK_TAB:
+            case VK_TAB:
+                NextTab(shift ? -1 : 1); // Tab: a aba seguinte (→); Shift+Tab: a anterior (←); Ctrl+Tab também
+                return true;
+            case 'W' when ctrl:
+                lock (_lock) if (_activeTab is { } current) PostUi(() => CloseTab(current));
+                return true;
+            case 'A':
                 _panel?.Toggle();
                 return true;
             case 'L':

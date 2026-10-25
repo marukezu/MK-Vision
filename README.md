@@ -37,13 +37,23 @@ Não precisa instalar nada: o .NET vem junto e o navegador usa o WebView2, que j
 | Placa de vídeo | Qualquer uma com DirectX 11 | NVIDIA (de preferência **RTX**), driver atualizado |
 | Espaço | ~750 MB | + ~4,5 GB para as bibliotecas da NVIDIA |
 
-**Atualizações:** ao abrir, o app verifica se há uma versão nova no GitHub. Havendo, ele avisa na tela e aparece **"Atualizar para a versão X"** no botão direito e no menu **Arquivo**. O app baixa a versão nova, fecha e abre de novo já atualizado. Configurações, favoritos e o resto continuam.
+**Atualizações:** ao abrir, o app verifica se há uma versão nova no GitHub. Havendo, ele avisa na tela e aparece **"Atualizar para a versão X"** no botão direito. O app baixa a versão nova, fecha e abre de novo já atualizado. Configurações, favoritos e o resto continuam.
 
 ---
 
 ## O player
 
-Abra um vídeo ou uma foto pelo menu **Arquivo**, arrastando para a janela, clicando na tela vazia (abre a lista de pastas) ou pelo navegador. O MK Vision também pode ser o **player padrão de vídeos** do Windows (Arquivo → Tornar o MK Vision o player padrão).
+Abra um vídeo ou uma foto com **Ctrl+O**, arrastando para a janela, clicando na tela vazia (abre a lista de pastas) ou pelo navegador. O MK Vision também pode ser o **player padrão de vídeos** do Windows (botão direito → Tornar o MK Vision o player padrão).
+
+### Abas
+
+Cada imagem ou vídeo abre na **sua própria aba**, e cada aba guarda a sua sessão: a posição do vídeo, a velocidade, o zoom, o giro e o espelho, o corte, as anotações, as versões da IA e a resposta do ComfyUI. Trocar de aba volta tudo como estava.
+
+- A faixa das abas aparece com o mouse no **topo da janela** (também na tela cheia).
+- Abrir algo que **já está aberto** vai para a aba dele; senão, abre uma aba nova ao lado da atual.
+- **Page Up / Page Down**, o carrossel do Instagram e a pasta trocam o conteúdo **dentro da própria aba**.
+- Clique troca de aba; o **X** ou o **botão do meio** fecha; **Tab** / **Shift+Tab** passam para a aba seguinte / anterior; **Ctrl+W** fecha a da tela.
+- Só a aba da tela usa a placa de vídeo: o vídeo de uma aba de fundo fica pausado e volta na mesma posição.
 
 ### Imagem melhor em tempo real
 
@@ -105,7 +115,9 @@ A tecla **G** manda a imagem da tela (com giro, corte e anotações) para workfl
 
 - **Área marcada:** contorne uma área com o F3 (retângulo ou um círculo à mão) e o modelo edita só ali. Fora dela, a imagem original volta intacta.
 - **Duas imagens:** a aba de 2 imagens tem um botão para escolher a segunda (`<image2>` no prompt).
-- **Vídeo:** os workflows de vídeo (Wan) abrem o resultado direto no player.
+- **Fila por aba:** cada aba do player pode mandar o seu pedido; eles rodam um por vez, na ordem, e a resposta volta para a aba que pediu, mesmo que você esteja em outra (a aba mostra o andamento: *gerando 40%*, *fila 2º*, *pronto ✓*). Fechar a aba cancela o pedido dela.
+- **Andamento:** *Passo 03/25 · 00:42 decorridos · 03:27 restantes (8,3 s por passo)*. O tempo conta desde que o ComfyUI começa o pedido (o carregamento do modelo entra; a espera na fila, não).
+- **Vídeo:** os workflows de vídeo (Wan) abrem o resultado numa aba nova, ao lado da imagem de origem.
 
 O app procura o ComfyUI em `C:\ComfyUI` (ou na pasta da variável `MKV_COMFY_DIR`) e liga o servidor sozinho quando preciso. Os workflows e os modelos ficam no próprio ComfyUI.
 
@@ -131,7 +143,9 @@ A IA de fotos, a câmera lenta com IA e a luz e cor na placa usam o **TensorRT**
 | ← / → | −5 s / +5 s |
 | Shift+← / Shift+→ | Quadro anterior / próximo |
 | ↑ / ↓ / Backspace | Velocidade +0,1 / −0,1 / normal |
-| Page Up / Page Down | Arquivo anterior / próximo da pasta |
+| Page Up / Page Down | Arquivo anterior / próximo da pasta (na mesma aba) |
+| Tab / Shift+Tab | Aba seguinte (→) / anterior (←) |
+| Ctrl+W | Fechar a aba |
 | F ou Enter | Tela cheia |
 | Esc | Sai da tela cheia (ou volta ao site de onde o vídeo veio) |
 | Z | Tira o zoom |
@@ -146,7 +160,7 @@ A IA de fotos, a câmera lenta com IA e a luz e cor na placa usam o **TensorRT**
 | Y | Luz e cor |
 | Ctrl+S / Shift+S | Salvar a imagem / o vídeo |
 | Ctrl+O | Abrir arquivo |
-| A ou Tab | Painel de ajustes |
+| A | Painel de ajustes |
 | P | Próximo perfil de nitidez |
 | + / − | Força |
 | 1 a 5 | Potência da IA de ampliação |

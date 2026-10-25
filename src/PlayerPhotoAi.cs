@@ -430,7 +430,7 @@ internal sealed partial class Player
     // é fácil clicar só para "ver" o resultado. Espaço e o botão de play continuam valendo.
     private bool StillGuard()
     {
-        lock (_lock) return !_playing && (HasLayers || Volatile.Read(ref _stillJobs) > 0);
+        lock (_lock) return !_playing && (HasLayers || Volatile.Read(ref _stillJobs) > 0 || (_activeTab is { } tab && ComfyJobOf(tab) is not null)); // o ComfyUI desta aba: o quadro fica
     }
 
     // Com _lock e _gpuLock (ou sem ninguém desenhando): descarta todas as versões.
