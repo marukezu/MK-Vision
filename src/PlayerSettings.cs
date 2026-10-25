@@ -68,6 +68,7 @@ internal sealed class PlayerSettings
         public int WebColorScheme { get; set; }
         public bool WebForceDark { get; set; }
         public string? LastSaveFolder { get; set; }
+        public string? LastBrowseFolder { get; set; }
     }
 
     private static readonly string FilePath = Environment.GetEnvironmentVariable("MKV_SETTINGS") is { Length: > 0 } test ? test // autoteste
@@ -100,6 +101,7 @@ internal sealed class PlayerSettings
     public int WebColorScheme;          // navegador: tema que os sites veem — 0 o do Windows, 1 escuro, 2 claro
     public bool WebForceDark;           // navegador: escurece também os sites que não têm tema escuro
     public string LastSaveFolder = "";  // Ctrl+S / Shift+S: a última pasta onde você salvou (o "Salvar como" abre nela)
+    public string LastBrowseFolder = ""; // a última pasta aberta (de onde abriu um arquivo ou por onde andou na lista)
     public float Volume = 1f; // 0–1
     public bool Muted;
     public int ListMode = 2; // lista da pasta: 1 ícones extra grandes, 2 grandes, 3 médios, 4 só os nomes
@@ -166,6 +168,7 @@ internal sealed class PlayerSettings
                 settings.WebColorScheme = Math.Clamp(s.WebColorScheme, 0, 2);
                 settings.WebForceDark = s.WebForceDark;
                 settings.LastSaveFolder = s.LastSaveFolder ?? "";
+                settings.LastBrowseFolder = s.LastBrowseFolder ?? "";
             }
         }
         catch (Exception error)
@@ -191,7 +194,7 @@ internal sealed class PlayerSettings
                 WebStartup = WebStartup, WebStartupPages = WebStartupPages, WebMobileSites = WebMobileSites,
                 AdBlockAllowed = AdBlockAllowed, AdBlockApplied = AdBlockApplied, WebClearOnClose = WebClearOnClose, WebSmartScreen = WebSmartScreen,
                 WebSleepMinutes = WebSleepMinutes, WebZoom = WebZoom, WebColorScheme = WebColorScheme, WebForceDark = WebForceDark,
-                LastSaveFolder = LastSaveFolder
+                LastSaveFolder = LastSaveFolder, LastBrowseFolder = LastBrowseFolder
             }));
         }
         catch (Exception error)

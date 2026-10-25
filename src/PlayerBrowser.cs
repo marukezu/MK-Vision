@@ -239,6 +239,7 @@ internal sealed partial class Player
         }
         catch { dirs = []; } // sem permissão
         _browseFolder = folder;
+        RememberFolder(folder);
         _browseFiles = [.. dirs, .. files];
         _browseDirs = dirs.Length;
         _listScroll = -1; // centraliza o vídeo aberto, se estiver nesta pasta
@@ -259,6 +260,19 @@ internal sealed partial class Player
         return current is null ? -1 : Array.FindIndex(_browseFiles, f => string.Equals(f, current, StringComparison.OrdinalIgnoreCase));
     }
 
+    // A última pasta aberta (de onde abriu um arquivo ou por onde andou na lista) fica guardada: a lista e o "Abrir"
+    // começam nela, também depois de fechar o app. Com _lock (de qualquer thread: grava na da janela).
+    private void RememberFolder(string? folder)
+    {
+        if (string.IsNullOrEmpty(folder) || string.Equals(_prefs.LastBrowseFolder, folder, StringComparison.OrdinalIgnoreCase)) return;
+        _prefs.LastBrowseFolder = folder;
+        PostUi(() => _prefs.Save());
+    }
+
+    // Onde a lista e o "Abrir" começam: a última pasta aberta (se ainda existe), senão Vídeos.
+    private string StartFolder() =>
+        _prefs.LastBrowseFolder is { Length: > 0 } last && Directory.Exists(last) ? last : Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
+
     // Com _lock, ao abrir a lista: a pasta do vídeo aberto fica aberta na árvore, selecionada e à vista.
     private void SyncTree()
     {
@@ -266,7 +280,7 @@ internal sealed partial class Player
         if (current == _browseSyncedTo && _browseFolder is not null) return;
         _browseSyncedTo = current;
         string? folder = current is not null ? System.IO.Path.GetDirectoryName(current) : null;
-        folder ??= _browseFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
+        folder ??= _browseFolder ?? StartFolder(); // nada aberto (ou da internet): a última pasta aberta
         ShowFolder(folder, record: true);
     }
 

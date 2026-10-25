@@ -625,7 +625,8 @@ internal static class PlayerTest
         void Check(string what, bool ok) { Console.WriteLine($"{(ok ? "ok  " : "FALHOU")} {what}"); if (!ok) fails++; }
         Move(0.5, 0.5); Check("centro: nada aberto", !player.FolderState.listOpen && !player.PanelVisible);
         Move(0.7, 0.5); Check("70% da largura: lista fechada", !player.FolderState.listOpen);
-        Move(0.78, 0.5); Check("78% da largura, meio: lista abre", player.FolderState.listOpen);
+        Move(0.78, 0.5); Check("78% da largura: ainda fechada (abre no último oitavo)", !player.FolderState.listOpen);
+        Move(0.92, 0.5); Check("92% da largura, meio: lista abre", player.FolderState.listOpen);
         Move(0.1, 0.5); Check("vai para a esquerda: lista fecha", !player.FolderState.listOpen);
         Move(0.5, 0.1); Check("alto, no meio: ajustes fechados", !player.PanelVisible);
         Move(0.8, 0.1); Check("80% da largura, alto: ajustes abrem", player.PanelVisible);
@@ -636,10 +637,10 @@ internal static class PlayerTest
         player.Panel!.Hide();
         // Lista aberta e o mouse sobe pela lista até o canto: os ajustes abrem ao sair dela pelo alto.
         Move(0.1, 0.5);
-        Move(0.85, 0.5); Check("lista aberta", player.FolderState.listOpen);
-        Move(0.85, 0.3); Move(0.85, 0.15);
+        Move(0.92, 0.5); Check("lista aberta", player.FolderState.listOpen);
+        Move(0.92, 0.3); Move(0.92, 0.15);
         Check("subindo pela lista: ajustes ainda fechados", !player.PanelVisible);
-        Move(0.85, 0.05); Check("saiu da lista pelo alto: ajustes abrem", player.PanelVisible);
+        Move(0.92, 0.05); Check("saiu da lista pelo alto: ajustes abrem", player.PanelVisible);
         player.Panel!.Hide();
         player.Dispose();
         Console.WriteLine(fails == 0 ? "tudo certo" : $"{fails} falha(s)");

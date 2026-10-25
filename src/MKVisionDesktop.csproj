@@ -11,7 +11,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>MKVisionDesktop</AssemblyName>
     <!-- Versão do app (a das Releases do GitHub) -->
-    <Version>1.1.0-beta</Version>
+    <Version>1.1.1-beta</Version>
     <RootNamespace>MKVision.Desktop</RootNamespace>
     <!-- Ícone do .exe e da janela: cópia do escolhido entre Icon\mk-lente.ico e Icon\mk-globo.ico
          (python Icon\gerar_ico.py lente|globo gera os dois e troca o app.ico) -->

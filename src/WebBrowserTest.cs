@@ -2928,6 +2928,78 @@ internal static class WebBrowserTest
         return failures == 0 ? 0 : 1;
     }
 
+    // --listfoldertest <pasta>: a lista de arquivos (borda direita) — abre só no último oitavo da largura (7/8; antes 3/4) e
+    // começa na última pasta aberta, também depois de fechar e abrir o app (não mais em Vídeos). Usar com MKV_SETTINGS.
+    public static int ListFolder(string folder)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        string photos = Path.Combine(folder, "minhas fotos");
+        Directory.CreateDirectory(photos);
+        string photo = Path.Combine(photos, "foto.png");
+        var pixels = new byte[400 * 300 * 4];
+        for (int i = 0; i < pixels.Length; i += 4) (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) = (90, 140, 200, 255);
+        InterpTest.Png(photo, pixels, 400, 0, 0, 400, 300);
+        using var gpu = new Gpu();
+        int failures = 0;
+        void Check(string what, bool ok, string detail)
+        {
+            Console.WriteLine($"{(ok ? "OK    " : "FALHOU")} {what}: {detail}");
+            if (!ok) failures++;
+        }
+        void Pump(double seconds)
+        {
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until)
+            {
+                while (Native.PeekMessage(out var msg, IntPtr.Zero, 0, 0, 1)) { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
+                Thread.Sleep(5);
+            }
+        }
+        bool Wait(Func<bool> condition, double seconds)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition() && clock.Elapsed.TotalSeconds < seconds) Pump(0.1);
+            return condition();
+        }
+        IntPtr Pos(int x, int y) => (IntPtr)((y << 16) | (x & 0xffff));
+
+        var player = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        player.OpenTab(photo);
+        Wait(() => player.TestTitle.Contains("foto.png"), 10);
+        Pump(0.5);
+        var shot = player.Snapshot()!.Value;
+        int w = shot.width, h = shot.height;
+        // 80% da largura (passa dos 3/4, não chega aos 7/8): não abre; 92%: abre.
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(w / 2, h / 2));
+        Pump(0.3);
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(w * 80 / 100, h / 2));
+        Pump(0.5);
+        Check("mouse a 80% da largura: a lista não abre", !player.TestListOpen, $"{player.TestListOpen}");
+        PlayerNative.PostMessage(player.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(w * 92 / 100, h / 2));
+        Pump(0.5);
+        Check("mouse a 92% da largura (último oitavo): abre", player.TestListOpen, $"{player.TestListOpen}");
+        player.TestCloseTab(0);
+        Pump(0.5);
+        player.Dispose();
+        Pump(0.5);
+
+        // "Fecha e abre o app": um player novo, nada aberto — a lista começa na última pasta.
+        var again = new Player(gpu, new object()) { IgnoreMouseLeave = true };
+        Pump(1);
+        var s2 = again.Snapshot()!.Value;
+        PlayerNative.PostMessage(again.Hwnd, PlayerNative.WM_MOUSEMOVE, IntPtr.Zero, Pos(s2.width / 2, s2.height / 2));
+        PlayerNative.PostMessage(again.Hwnd, PlayerNative.WM_LBUTTONDOWN, IntPtr.Zero, Pos(s2.width / 2, s2.height / 2));
+        PlayerNative.PostMessage(again.Hwnd, PlayerNative.WM_LBUTTONUP, IntPtr.Zero, Pos(s2.width / 2, s2.height / 2));
+        Wait(() => again.TestListOpen, 3);
+        Pump(0.5);
+        string? browse = again.TreeState.browse;
+        Check("depois de abrir o app de novo: a lista na última pasta aberta", again.TestListOpen && string.Equals(browse, photos, StringComparison.OrdinalIgnoreCase),
+            $"aberta {again.TestListOpen}, pasta \"{browse}\"");
+        again.Dispose();
+        Console.WriteLine(failures == 0 ? "tudo certo" : $"{failures} falha(s)");
+        return failures == 0 ? 0 : 1;
+    }
+
     public static int Tabs(string folder)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;

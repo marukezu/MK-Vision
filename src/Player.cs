@@ -321,6 +321,7 @@ internal sealed partial class Player : IDisposable
         {
             if (!IsWeb(path) && !IsWebKey(path)) _fromWeb = false;
             TrackOpen(path); // PlayerTabs: na aba da tela (sem aba: cria uma)
+            if (!IsWeb(path) && !IsWebKey(path)) RememberFolder(Path.GetDirectoryName(Path.GetFullPath(path))); // PlayerBrowser
             _pendingOpen = path;
             (_folderFiles, _folderIndex) = (files, index);
             _listScroll = -1; // a lista se posiciona no vídeo atual na próxima vez que abrir
@@ -372,21 +373,23 @@ internal sealed partial class Player : IDisposable
     {
         var thread = new Thread(() =>
         {
-            string? path = AskForFile();
+            string start;
+            lock (_lock) start = StartFolder();
+            string? path = AskForFile(start);
             if (path is not null) PostUi(() => OpenTab(path)); // em aba nova (ou na aba onde já está)
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
     }
 
-    private static string? AskForFile()
+    // "folder": onde a janela abre (a última pasta aberta).
+    private static string? AskForFile(string folder)
     {
         const int max = 2048;
         var buffer = Marshal.AllocHGlobal(max * 2);
         try
         {
             Marshal.WriteInt16(buffer, 0);
-            string folder = Path.Combine(VideoDownload.DownloadsFolder(), "MK Vision");
             var dialog = new OPENFILENAME
             {
                 lStructSize = Marshal.SizeOf<OPENFILENAME>(),

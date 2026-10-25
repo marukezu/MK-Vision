@@ -166,7 +166,8 @@ internal sealed partial class Player
     private int ListVisible() => Math.Max(1, (ListRect().Height - U(ListHeader) - U(8)) / U(CellHeight())); // linhas visíveis
 
     // Faixa que abre a lista: o último quarto da largura, na altura do meio (30% a 70%).
-    private bool InListTrigger(int x, int y) => x >= _clientW * 3 / 4 && Math.Abs(y - _clientH / 2) <= _clientH * 0.2;
+    // A faixa que abre a lista: o último oitavo da largura (à direita), no meio da altura.
+    private bool InListTrigger(int x, int y) => x >= _clientW * 7 / 8 && Math.Abs(y - _clientH / 2) <= _clientH * 0.2;
 
     private void ClampListScroll()
     {
